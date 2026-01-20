@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222.2 47.4% 11.2%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 47.4% 11.2%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47.4% 11.2%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply text-foreground backdrop-blur-2xl;
+    background: rgba(17, 24, 39, 0.65);
+  }
+}
+
+/* Glass-morphism utilities */
+
+
+
+.glass {
+  @apply backdrop-blur-2xl;
+  background: rgba(17, 24, 39, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+}
+
+.glass-dark {
+  @apply backdrop-blur-2xl;
+  background: rgba(17, 24, 39, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 13px 3px rgba(0, 0, 0, 0.20);
+}
+
+
+.glass-dark-app {
+  @apply backdrop-blur-2xl;
+  background: rgba(17, 24, 39, 0.65) !important;
+
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-800/50 rounded-lg;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-600/70 rounded-lg;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500/80;
+}
+
+::-webkit-scrollbar-corner {
+  @apply bg-gray-800/50;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(75 85 99 / 0.7) rgb(31 41 55 / 0.5);
+}
