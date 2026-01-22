@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('save-project-manifest', data),
   getRecentProjects: () => ipcRenderer.invoke('get-recent-projects'),
   loadProject: (projectPath: string) => ipcRenderer.invoke('load-project', projectPath),
+  deleteProject: (projectPath: string) => ipcRenderer.invoke('delete-project', projectPath),
 
   // Listen for HUD data updates (from main window to HUD window)
   onHUDDataUpdate: (callback: (data: any) => void) => {
@@ -53,6 +54,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Remove capture success listener
   removeCaptureSuccessListener: () => {
     ipcRenderer.removeAllListeners('capture-success')
+  },
+
+  // Trigger capture from hotkey
+  onHotkeyCapture: (callback: () => void) => {
+    ipcRenderer.on('hotkey-capture', () => callback())
+  },
+  removeHotkeyCaptureListener: () => {
+    ipcRenderer.removeAllListeners('hotkey-capture')
   },
 
   // Listen for step captured events (for auto-advancing)
@@ -96,5 +105,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeCaptureCompletedListener: () => {
     ipcRenderer.removeAllListeners('capture-completed')
   },
+
+  // Config
+  getConfig: () => ipcRenderer.invoke('get-config'),
+  saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
 })
 

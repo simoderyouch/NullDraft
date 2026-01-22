@@ -39,6 +39,54 @@ export default function FloatingHUD() {
   const activeSteps = hudData.steps?.filter(s => !s.skipped) || []
   const currentStep = activeSteps[currentStepIndex]
 
+  const handleCapture = useCallback(async () => {
+    if (captureStatus === 'capturing' || !currentStep) return
+
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.captureScreenshot) {
+      setCaptureStatus('capturing')
+      try {
+        // Pass step info to capture with step-based naming
+        const stepInfo = hudData.projectPath ? {
+          projectPath: hudData.projectPath,
+          stepNumber: currentStep.number,
+          stepTitle: currentStep.title,
+        } : undefined
+
+        const result = await window.electronAPI.captureScreenshot(stepInfo)
+        if (result.success) {
+          console.log('Screenshot saved:', result.filename)
+          // Success feedback and advance handled by onCaptureSuccess listener
+        } else {
+          setCaptureStatus('error')
+          setTimeout(() => setCaptureStatus('idle'), 2000)
+          console.error('Capture failed:', result.error)
+        }
+      } catch (error) {
+        setCaptureStatus('error')
+        setTimeout(() => setCaptureStatus('idle'), 2000)
+        console.error('Capture error:', error)
+      }
+    }
+  }, [captureStatus, currentStep, hudData.projectPath])
+
+  const handleSkip = useCallback(() => {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.skipStep()
+    }
+  }, [])
+
+  const handleBack = useCallback(() => {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.backStep()
+    }
+  }, [])
+
+  const handleFinish = useCallback(() => {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.completeCapture()
+    }
+  }, [])
+
   // Advance to next step
   const advanceStep = useCallback(() => {
     const nextIndex = currentStepIndex + 1
@@ -99,16 +147,21 @@ export default function FloatingHUD() {
         }
       })
 
+      window.electronAPI.onHotkeyCapture(() => {
+        handleCapture()
+      })
+
       return () => {
         if (window.electronAPI) {
           window.electronAPI.removeHUDDataListener()
           window.electronAPI.removeCaptureSuccessListener()
           window.electronAPI.removeStepSkippedListener()
           window.electronAPI.removeStepBackListener()
+          window.electronAPI.removeHotkeyCaptureListener()
         }
       }
     }
-  }, [advanceStep, currentStepIndex, activeSteps])
+  }, [advanceStep, currentStepIndex, activeSteps, handleCapture])
 
   useEffect(() => {
     // Set body background to transparent for the HUD window
@@ -119,54 +172,6 @@ export default function FloatingHUD() {
       document.body.style.background = originalBackground
     }
   }, [])
-
-  const handleCapture = async () => {
-    if (captureStatus === 'capturing' || !currentStep) return
-
-    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.captureScreenshot) {
-      setCaptureStatus('capturing')
-      try {
-        // Pass step info to capture with step-based naming
-        const stepInfo = hudData.projectPath ? {
-          projectPath: hudData.projectPath,
-          stepNumber: currentStep.number,
-          stepTitle: currentStep.title,
-        } : undefined
-
-        const result = await window.electronAPI.captureScreenshot(stepInfo)
-        if (result.success) {
-          console.log('Screenshot saved:', result.filename)
-          // Success feedback and advance handled by onCaptureSuccess listener
-        } else {
-          setCaptureStatus('error')
-          setTimeout(() => setCaptureStatus('idle'), 2000)
-          console.error('Capture failed:', result.error)
-        }
-      } catch (error) {
-        setCaptureStatus('error')
-        setTimeout(() => setCaptureStatus('idle'), 2000)
-        console.error('Capture error:', error)
-      }
-    }
-  }
-
-  const handleSkip = () => {
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.skipStep()
-    }
-  }
-
-  const handleBack = () => {
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.backStep()
-    }
-  }
-
-  const handleFinish = () => {
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.completeCapture()
-    }
-  }
 
   // Completion screen
   if (isComplete) {

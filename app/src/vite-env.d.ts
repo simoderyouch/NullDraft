@@ -58,12 +58,15 @@ interface Window {
     saveProjectManifest: (data: { projectPath: string; manifest: object }) => Promise<{ success: boolean; error?: string }>
     getRecentProjects: () => Promise<GetRecentProjectsResult>
     loadProject: (projectPath: string) => Promise<{ success: boolean; project?: any; error?: string }>
+    deleteProject: (projectPath: string) => Promise<{ success: boolean; error?: string }>
 
     // Event listeners
     onHUDDataUpdate: (callback: (data: any) => void) => void
     removeHUDDataListener: () => void
     onCaptureSuccess: (callback: (data: { filepath: string; filename: string }) => void) => void
     removeCaptureSuccessListener: () => void
+    onHotkeyCapture: (callback: () => void) => void
+    removeHotkeyCaptureListener: () => void
     onStepCaptured: (callback: (data: { filepath: string; filename: string; stepNumber?: number }) => void) => void
     removeStepCapturedListener: () => void
     onStepSkipped: (callback: () => void) => void
@@ -73,6 +76,18 @@ interface Window {
     completeCapture: () => Promise<boolean>
     onCaptureCompleted: (callback: () => void) => void
     removeCaptureCompletedListener: () => void
+
+    // Config
+    getConfig: () => Promise<AppConfig>
+    saveConfig: (config: AppConfig) => Promise<boolean>
   }
+}
+
+interface AppConfig {
+  apiKey: string
+  captureHotkey: string
+  skipHotkey: string
+  backHotkey: string
+  darkMode: boolean
 }
 

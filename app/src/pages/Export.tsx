@@ -34,15 +34,15 @@ export default function Export() {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <Button
+          {/* <Button
             variant="ghost"
-            onClick={() => navigate('/capture')}
+            onClick={() => navigate('/')}
             className="gap-2"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
-          </Button>
-          <h1 className="text-3xl font-bold">Generate Document</h1>
+          </Button>*/}
+          <h1 className="text-3xl font-bold mx-auto">Generate Document</h1>
           <div className="w-20" /> {/* Spacer for centering */}
         </div>
 
@@ -134,7 +134,7 @@ export default function Export() {
         <div className="flex justify-end gap-4">
           <Button
             variant="outline"
-            onClick={() => navigate('/capture')}
+            onClick={() => navigate('/')}
           >
             Cancel
           </Button>

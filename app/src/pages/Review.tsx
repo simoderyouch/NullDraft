@@ -193,10 +193,22 @@ export default function Review() {
             </p>
           </div>
           <Button
-            onClick={handleStartCapture}
+            onClick={() => {
+              if (!hasUncapturedSteps) {
+                navigate('/export', {
+                  state: {
+                    projectPath: loadedProjectPath,
+                    projectName
+                  }
+                })
+              } else {
+                handleStartCapture()
+              }
+            }}
             className="gap-2   hover:shadow-primary/40 transition-shadow"
-            disabled={steps.length === 0 || !hasUncapturedSteps}
+            disabled={steps.length === 0}
             size="lg"
+            variant={!hasUncapturedSteps ? "secondary" : "default"}
           >
             {hasUncapturedSteps ? 'Start Capture' : 'All Done'}
             <ArrowRight className="h-4 w-4" />

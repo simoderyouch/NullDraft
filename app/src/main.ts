@@ -1,15 +1,18 @@
 console.log('Main process starting... code execution begun.')
-import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut } from 'electron'
 
 // Disable sandbox on Linux to fix AppImage SUID issues
 // Disable sandbox on Linux to fix AppImage SUID issues (only in production)
-if (process.platform === 'linux' && app.isPackaged) {
-  app.commandLine.appendSwitch('no-sandbox')
-  app.commandLine.appendSwitch('disable-setuid-sandbox')
+if (process.platform === 'linux') {
   app.disableHardwareAcceleration()
+  if (app.isPackaged) {
+    app.commandLine.appendSwitch('no-sandbox')
+    app.commandLine.appendSwitch('disable-setuid-sandbox')
+  }
 }
 import { join } from 'path'
-import { mkdir, writeFile, readdir, readFile, stat } from 'fs/promises'
+import { mkdir, writeFile, readdir, readFile, stat, rm } from 'fs/promises'
+import { existsSync } from 'fs'
 
 // The built directory structure
 //
@@ -38,6 +41,97 @@ let hudWindow: BrowserWindow | null = null
 let isQuiting = false
 let tray: Tray | null = null
 let hudData: any = null // Store HUD data for retrieval
+
+// Config Interface
+interface AppConfig {
+  apiKey: string
+  captureHotkey: string
+  skipHotkey: string
+  backHotkey: string
+  darkMode: boolean
+}
+
+const DEFAULT_CONFIG: AppConfig = {
+  apiKey: '',
+  captureHotkey: 'CommandOrControl+Shift+S',
+  skipHotkey: 'CommandOrControl+Shift+N',
+  backHotkey: 'CommandOrControl+Shift+B',
+  darkMode: false,
+}
+
+let currentConfig: AppConfig = { ...DEFAULT_CONFIG }
+
+// Config Management
+function getConfigPath(): string {
+  return join(app.getPath('userData'), 'config.json')
+}
+
+async function loadConfig() {
+  try {
+    const configPath = getConfigPath()
+    if (existsSync(configPath)) {
+      const data = await readFile(configPath, 'utf-8')
+      currentConfig = { ...DEFAULT_CONFIG, ...JSON.parse(data) }
+    } else {
+      await saveConfig(DEFAULT_CONFIG)
+    }
+  } catch (error) {
+    console.error('Failed to load config:', error)
+  }
+}
+
+async function saveConfig(config: AppConfig) {
+  try {
+    const configPath = getConfigPath()
+    await writeFile(configPath, JSON.stringify(config, null, 2))
+    currentConfig = config
+    registerGlobalShortcuts() // Re-register shortcuts on save
+  } catch (error) {
+    console.error('Failed to save config:', error)
+  }
+}
+
+// Global Shortcut Management
+function registerGlobalShortcuts() {
+  globalShortcut.unregisterAll()
+
+  if (currentConfig.captureHotkey) {
+    try {
+      globalShortcut.register(currentConfig.captureHotkey, () => {
+        console.log('Capture hotkey triggered')
+        // Notify HUD to perform capture with its local state
+        if (hudWindow && !hudWindow.isDestroyed()) {
+          hudWindow.webContents.send('hotkey-capture')
+        }
+      })
+    } catch (e) { console.error('Failed to register capture hotkey', e) }
+  }
+
+  if (currentConfig.skipHotkey) {
+    try {
+      globalShortcut.register(currentConfig.skipHotkey, () => {
+        console.log('Skip hotkey triggered')
+        // Trigger skip in main (which notifies HUD)
+        if (hudWindow && !hudWindow.isDestroyed()) {
+          handleSkipStep()
+        }
+      })
+    } catch (e) { console.error('Failed to register skip hotkey', e) }
+  }
+
+  if (currentConfig.backHotkey) {
+    try {
+      globalShortcut.register(currentConfig.backHotkey, () => {
+        console.log('Back hotkey triggered')
+        // Trigger back in main (which notifies HUD)
+        if (hudWindow && !hudWindow.isDestroyed()) {
+          handleBackStep()
+        }
+      })
+    } catch (e) { console.error('Failed to register back hotkey', e) }
+  }
+}
+
 
 // Get projects base directory
 function getProjectsDir(): string {
@@ -229,7 +323,196 @@ function createTray() {
   })
 }
 
-app.whenReady().then(() => {
+// Core Action Logic using standalone functions to be reused by IPC and Shortcuts
+
+async function performCapture(stepInfo?: { projectPath: string; stepNumber: number; stepTitle: string }) {
+  try {
+    // Temporarily hide HUD to avoid capturing it
+    const wasHudVisible = hudWindow?.isVisible() ?? false
+    if (wasHudVisible && hudWindow) {
+      hudWindow.hide()
+    }
+
+    // Wait for HUD to hide
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    // Generate filename based on step info or timestamp
+    let filename: string
+    let filepath: string
+
+    if (stepInfo) {
+      // Use step-based naming
+      const paddedNumber = String(stepInfo.stepNumber).padStart(2, '0')
+      const safeTitle = stepInfo.stepTitle || 'untitled'
+      const slug = safeTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '')
+        .slice(0, 30)
+      filename = `step-${paddedNumber}-${slug}.png`
+      filepath = join(stepInfo.projectPath, filename)
+    } else {
+      // Fallback to timestamp naming in projects dir
+      const now = new Date()
+      const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      filename = `capture-${timestamp}.png`
+      const projectsDir = getProjectsDir()
+      await mkdir(projectsDir, { recursive: true })
+      filepath = join(projectsDir, filename)
+    }
+
+    // Use gnome-screenshot for Wayland support
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    const execAsync = promisify(exec)
+
+    // TODO: Support other platforms
+    if (process.platform === 'linux') {
+      await execAsync(`gnome-screenshot -f "${filepath}"`)
+    } else {
+      // Fallback or specific impl for Mac/Win if needed (screenshot-desktop handles some)
+      // For now reusing Linux logic or fallback to screenshot-desktop
+      const screenshot = await import('screenshot-desktop')
+      await screenshot.default({ filename: filepath })
+    }
+
+
+    console.log('Screenshot saved to:', filepath)
+
+    // Flash effect for visual feedback
+    const { screen } = await import('electron')
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width, height } = primaryDisplay.size
+
+    const flashWindow = new BrowserWindow({
+      width,
+      height,
+      x: 0,
+      y: 0,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      focusable: false,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    })
+
+    flashWindow.loadURL(`data:text/html,
+        <html>
+          <head>
+            <style>
+              body {
+                margin: 0;
+                padding: 0;
+                background: white;
+                opacity: 0.6;
+                animation: flash 100ms ease-out forwards;
+              }
+              @keyframes flash {
+                0% { opacity: 0.6; }
+                100% { opacity: 0; }
+              }
+            </style>
+          </head>
+          <body></body>
+        </html>
+      `)
+
+    flashWindow.once('ready-to-show', () => {
+      flashWindow.show()
+      setTimeout(() => {
+        flashWindow.close()
+      }, 150)
+    })
+
+    // Restore HUD visibility
+    if (wasHudVisible && hudWindow) {
+      hudWindow.show()
+    }
+
+    // Update project.json manifest with captured image path
+    if (stepInfo) {
+      try {
+        const manifestPath = join(stepInfo.projectPath, 'project.json')
+        const { readFile } = await import('fs/promises')
+        const manifestContent = await readFile(manifestPath, 'utf-8')
+        const manifest = JSON.parse(manifestContent)
+
+        // Update the step with imagePath and captured status
+        if (manifest.steps) {
+          manifest.steps = manifest.steps.map((step: any) => {
+            if (step.number === stepInfo.stepNumber) {
+              return { ...step, imagePath: filename, captured: true }
+            }
+            return step
+          })
+        }
+        manifest.updatedAt = new Date().toISOString()
+
+        await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+        console.log('Manifest updated for step:', stepInfo.stepNumber)
+      } catch (manifestError) {
+        console.error('Failed to update manifest:', manifestError)
+      }
+    }
+
+    // Notify HUD of success
+    if (hudWindow) {
+      hudWindow.webContents.send('capture-success', { filepath, filename })
+    }
+
+    // Notify main window to advance to next step
+    if (mainWindow) {
+      mainWindow.webContents.send('step-captured', { filepath, filename, stepNumber: stepInfo?.stepNumber })
+    }
+
+    return { success: true, filepath, filename }
+  } catch (error) {
+    console.error('Screenshot capture failed:', error)
+    // Restore HUD visibility on error
+    if (hudWindow?.isVisible() === false) {
+      hudWindow.show()
+    }
+    return { success: false, error: String(error) }
+  }
+}
+
+function handleSkipStep() {
+  console.log('Step skip requested')
+  // Notify main window to move to next step
+  if (mainWindow) {
+    mainWindow.webContents.send('step-skipped')
+  }
+  // Notify HUD to update
+  if (hudWindow) {
+    hudWindow.webContents.send('step-skipped')
+  }
+  return true
+}
+
+function handleBackStep() {
+  console.log('Step back requested')
+  // Notify main window to move to next step
+  if (mainWindow) {
+    mainWindow.webContents.send('step-back')
+  }
+  // Notify HUD to update
+  if (hudWindow) {
+    hudWindow.webContents.send('step-back')
+  }
+  return true
+}
+
+
+app.whenReady().then(async () => {
+  await loadConfig() // Load config before creating windows
+
   // Set desktop name for Linux icon association
   if (process.platform === 'linux') {
     // @ts-ignore
@@ -240,6 +523,18 @@ app.whenReady().then(() => {
   createMainWindow()
   createHUDWindow()
   createTray()
+  registerGlobalShortcuts()
+
+  // Config IPC Handlers
+  ipcMain.handle('get-config', () => {
+    return currentConfig
+  })
+
+  ipcMain.handle('save-config', async (_event, config: AppConfig) => {
+    await saveConfig(config)
+    return true
+  })
+
 
   // IPC handlers for window communication
   ipcMain.handle('show-hud', () => {
@@ -318,178 +613,16 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('capture-screenshot', async (_event, stepInfo?: { projectPath: string; stepNumber: number; stepTitle: string }) => {
-    try {
-      // Temporarily hide HUD to avoid capturing it
-      const wasHudVisible = hudWindow?.isVisible() ?? false
-      if (wasHudVisible && hudWindow) {
-        hudWindow.hide()
-      }
-
-      // Wait for HUD to hide
-      await new Promise(resolve => setTimeout(resolve, 200))
-
-      // Generate filename based on step info or timestamp
-      let filename: string
-      let filepath: string
-
-      if (stepInfo) {
-        // Use step-based naming
-        const paddedNumber = String(stepInfo.stepNumber).padStart(2, '0')
-        const slug = stepInfo.stepTitle
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/(^-|-$)/g, '')
-          .slice(0, 30)
-        filename = `step-${paddedNumber}-${slug}.png`
-        filepath = join(stepInfo.projectPath, filename)
-      } else {
-        // Fallback to timestamp naming in projects dir
-        const now = new Date()
-        const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-        filename = `capture-${timestamp}.png`
-        const projectsDir = getProjectsDir()
-        await mkdir(projectsDir, { recursive: true })
-        filepath = join(projectsDir, filename)
-      }
-
-      // Use gnome-screenshot for Wayland support
-      const { exec } = await import('child_process')
-      const { promisify } = await import('util')
-      const execAsync = promisify(exec)
-
-      await execAsync(`gnome-screenshot -f "${filepath}"`)
-
-      console.log('Screenshot saved to:', filepath)
-
-      // Flash effect for visual feedback
-      const { screen } = await import('electron')
-      const primaryDisplay = screen.getPrimaryDisplay()
-      const { width, height } = primaryDisplay.size
-
-      const flashWindow = new BrowserWindow({
-        width,
-        height,
-        x: 0,
-        y: 0,
-        frame: false,
-        transparent: true,
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        resizable: false,
-        movable: false,
-        focusable: false,
-        show: false,
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-        },
-      })
-
-      flashWindow.loadURL(`data:text/html,
-        <html>
-          <head>
-            <style>
-              body {
-                margin: 0;
-                padding: 0;
-                background: white;
-                opacity: 0.6;
-                animation: flash 100ms ease-out forwards;
-              }
-              @keyframes flash {
-                0% { opacity: 0.6; }
-                100% { opacity: 0; }
-              }
-            </style>
-          </head>
-          <body></body>
-        </html>
-      `)
-
-      flashWindow.once('ready-to-show', () => {
-        flashWindow.show()
-        setTimeout(() => {
-          flashWindow.close()
-        }, 150)
-      })
-
-      // Restore HUD visibility
-      if (wasHudVisible && hudWindow) {
-        hudWindow.show()
-      }
-
-      // Update project.json manifest with captured image path
-      if (stepInfo) {
-        try {
-          const manifestPath = join(stepInfo.projectPath, 'project.json')
-          const { readFile } = await import('fs/promises')
-          const manifestContent = await readFile(manifestPath, 'utf-8')
-          const manifest = JSON.parse(manifestContent)
-
-          // Update the step with imagePath and captured status
-          if (manifest.steps) {
-            manifest.steps = manifest.steps.map((step: any) => {
-              if (step.number === stepInfo.stepNumber) {
-                return { ...step, imagePath: filename, captured: true }
-              }
-              return step
-            })
-          }
-          manifest.updatedAt = new Date().toISOString()
-
-          await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
-          console.log('Manifest updated for step:', stepInfo.stepNumber)
-        } catch (manifestError) {
-          console.error('Failed to update manifest:', manifestError)
-        }
-      }
-
-      // Notify HUD of success
-      if (hudWindow) {
-        hudWindow.webContents.send('capture-success', { filepath, filename })
-      }
-
-      // Notify main window to advance to next step
-      if (mainWindow) {
-        mainWindow.webContents.send('step-captured', { filepath, filename, stepNumber: stepInfo?.stepNumber })
-      }
-
-      return { success: true, filepath, filename }
-    } catch (error) {
-      console.error('Screenshot capture failed:', error)
-      // Restore HUD visibility on error
-      if (hudWindow?.isVisible() === false) {
-        hudWindow.show()
-      }
-      return { success: false, error: String(error) }
-    }
+    return await performCapture(stepInfo)
   })
 
   ipcMain.handle('skip-step', () => {
-    console.log('Step skip requested')
-    // Notify main window to move to next step
-    if (mainWindow) {
-      mainWindow.webContents.send('step-skipped')
-    }
-    // Notify HUD to update
-    if (hudWindow) {
-      hudWindow.webContents.send('step-skipped')
-    }
-    return true
+    return handleSkipStep()
   })
 
 
   ipcMain.handle('back-step', () => {
-    console.log('Step back requested')
-    // Notify main window to move to next step
-    if (mainWindow) {
-      mainWindow.webContents.send('step-back')
-    }
-    // Notify HUD to update
-    if (hudWindow) {
-      hudWindow.webContents.send('step-back')
-    }
-    return true
+    return handleBackStep()
   })
 
   ipcMain.handle('complete-capture', () => {
@@ -598,6 +731,24 @@ app.whenReady().then(() => {
       }
     } catch (error) {
       console.error('Failed to load project:', error)
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // Delete project
+  ipcMain.handle('delete-project', async (_event, projectPath: string) => {
+    try {
+      console.log('Deleting project at:', projectPath)
+      // verify it's inside projects dir for safety
+      const projectsDir = getProjectsDir()
+      if (!projectPath.startsWith(projectsDir)) {
+        throw new Error('Invalid project path')
+      }
+
+      await rm(projectPath, { recursive: true, force: true })
+      return { success: true }
+    } catch (error) {
+      console.error('Failed to delete project:', error)
       return { success: false, error: String(error) }
     }
   })

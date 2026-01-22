@@ -2,6 +2,7 @@
   "name": "nulldraft",
   "version": "0.1.0",
   "description": "AI-powered desktop application that turns instructions into step-by-step screenshot documentation",
+  "author": "Edder <edder@example.com>",
   "main": "out/main/main.js",
   "type": "module",
   "scripts": {

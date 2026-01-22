@@ -88,7 +88,7 @@ export default function CreateProject() {
         <div className="min-h-screen p-8">
             <div className="max-w-4xl mx-auto space-y-8">
                 {/* Header */}
-                <div className="flex items-center justify-between">
+                <div className="flex items-center z-99 justify-between">
                     <Button variant="ghost" onClick={() => navigate('/')} className="gap-2">
                         <ArrowLeft className="h-4 w-4" />
                         Back
