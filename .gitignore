@@ -23,3 +23,10 @@ backend/.venv/
 .env
 *.env
 !*.env.example
+
+# Editor
+.vscode/
+
+# Markdown notes (keep only the README)
+*.md
+!README.md
