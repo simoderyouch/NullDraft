@@ -49,9 +49,34 @@ interface Window {
     minimizeWindow: () => Promise<boolean>
 
     // Capture control
-    captureScreenshot: (stepInfo?: StepInfo) => Promise<CaptureResult>
+    captureScreenshot: (stepInfo?: StepInfo, options?: CaptureOptions) => Promise<CaptureResult>
+    retakeScreenshot: (stepInfo: StepInfo & { currentImage?: string }, options?: CaptureOptions) => Promise<CaptureResult>
+    getScreenshotHistory: (projectPath: string) => Promise<{ success: boolean; files: string[]; error?: string }>
     skipStep: () => Promise<boolean>
     backStep: () => Promise<boolean>
+
+    // Displays & capture sources
+    getDisplays: () => Promise<Array<{ id: number; index: number; label: string; bounds: any; isPrimary: boolean }>>
+    getWindowSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>
+
+    // Backend
+    getBackendHealth: () => Promise<any>
+    getBackendUrl: () => Promise<string>
+    restartBackend: () => Promise<any>
+
+    // File helpers
+    readFileBase64: (filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>
+    saveBase64Image: (data: { filePath: string; base64: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+    openPath: (targetPath: string) => Promise<{ success: boolean; error?: string }>
+    showItemInFolder: (targetPath: string) => Promise<{ success: boolean }>
+    pickDirectory: () => Promise<{ success: boolean; path?: string }>
+    pickFile: (filters?: Array<{ name: string; extensions: string[] }>) => Promise<{ success: boolean; path?: string }>
+    getDefaultProjectLocation: () => Promise<string>
+
+    // Crash recovery / session tracking
+    setActiveSession: (data: { projectPath: string; inProgress: boolean }) => Promise<boolean>
+    getRecoveryInfo: () => Promise<{ recover: boolean; projectPath?: string; name?: string }>
+    clearActiveSession: () => Promise<boolean>
 
     // Project management
     initProject: (projectName: string) => Promise<InitProjectResult>
@@ -83,11 +108,33 @@ interface Window {
   }
 }
 
+interface CaptureOptions {
+  mode?: 'fullscreen' | 'window' | 'region' | 'display'
+  displayId?: number
+  sourceId?: string
+  region?: { x: number; y: number; width: number; height: number }
+  reuseLastRegion?: boolean
+  format?: 'png' | 'jpg'
+  quality?: number
+}
+
 interface AppConfig {
   apiKey: string
   captureHotkey: string
   skipHotkey: string
   backHotkey: string
   darkMode: boolean
+  provider: string
+  defaultProjectLocation: string
+  exportFormat: string
+  exportTemplate: string
+  screenshotFormat: string
+  screenshotQuality: number
+  localOnly: boolean
+  encryptProjects: boolean
+  encryptionPassphrase: string
+  lastRegion: { x: number; y: number; width: number; height: number } | null
+  lastActiveProject: string
+  captureInProgress: boolean
 }
 

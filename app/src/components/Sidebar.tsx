@@ -1,6 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Button } from './ui/button'
-import { Home, FileText, Camera, Download, Settings } from 'lucide-react'
+import { Home, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export default function Sidebar() {

@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9
+python-dotenv>=1.0
+pydantic>=2.0
+PyPDF2>=3.0
+python-docx>=1.1
+Pillow>=10.0
+mistralai>=1.0
+# Optional alternative provider (used when AI_PROVIDER=openai):
+openai>=1.0

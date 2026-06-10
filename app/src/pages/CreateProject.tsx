@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical } from 'lucide-react'
+import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, UploadCloud } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { v4 as uuidv4 } from 'uuid'
 import { Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
+import { uploadAssessmentAndGenerateSteps } from '@/lib/api'
 
 export default function CreateProject() {
     const navigate = useNavigate()
@@ -32,6 +33,62 @@ export default function CreateProject() {
             skipped: false
         }]
     })
+
+    const [isUploading, setIsUploading] = useState(false)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const processFile = async (file: File) => {
+        setIsUploading(true)
+        try {
+            if (!projectName.trim()) {
+                setProjectName(file.name.replace(/\.[^.]+$/, ''))
+            }
+            const data = await uploadAssessmentAndGenerateSteps(file)
+            if (data.steps && Array.isArray(data.steps)) {
+                setSteps(data.steps.map((s: any, idx: number) => ({
+                    id: uuidv4(),
+                    number: idx + 1,
+                    title: s.title || '',
+                    description: s.description || '',
+                    imagePath: null,
+                    captured: false,
+                    skipped: false
+                })))
+            }
+        } catch (error) {
+            console.error('Failed to generate steps:', error)
+            alert('Failed to generate steps from file. Is the backend running and the API key set?')
+        } finally {
+            setIsUploading(false)
+        }
+    }
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        await processFile(file)
+    }
+
+    // Handle a file dropped on the dashboard, or a template chosen there.
+    useEffect(() => {
+        if (location.state?.droppedFile instanceof File) {
+            processFile(location.state.droppedFile)
+        } else if (location.state?.templateSteps && Array.isArray(location.state.templateSteps)) {
+            setSteps(location.state.templateSteps.map((s: any, idx: number) => ({
+                id: uuidv4(),
+                number: idx + 1,
+                title: s.title || '',
+                description: s.description || '',
+                imagePath: null,
+                captured: false,
+                skipped: false,
+            })))
+            if (location.state.templateName && !projectName.trim()) {
+                setProjectName(location.state.templateName)
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     const handleAddStep = () => {
         setSteps(prev => [
@@ -124,6 +181,27 @@ export default function CreateProject() {
                                 onChange={(e) => setProjectName(e.target.value)}
                                 className="bg-background/50"
                             />
+                        </div>
+                        
+                        <div className="space-y-2 border-t pt-4">
+                            <Label>Or upload an assignment/TP file to auto-generate steps (txt, md, pdf, docx, tex)</Label>
+                            <div className="flex items-center gap-4">
+                                <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    ref={fileInputRef} 
+                                    onChange={handleFileUpload}
+                                    accept=".txt,.md,.pdf,.docx,.tex"
+                                />
+                                <Button 
+                                    variant="outline" 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isUploading}
+                                >
+                                    <UploadCloud className="h-4 w-4 mr-2" />
+                                    {isUploading ? 'Generating...' : 'Upload File'}
+                                </Button>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

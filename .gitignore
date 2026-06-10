@@ -8,4 +8,18 @@ dist-electron
 app/node_modules
 app/dist
 app/out
-app/dist-electron 
+app/dist-electron
+
+# Build artifacts
+*.tsbuildinfo
+
+# Python backend
+backend/venv/
+backend/.venv/
+**/__pycache__/
+*.pyc
+
+# Secrets / environment
+.env
+*.env
+!*.env.example

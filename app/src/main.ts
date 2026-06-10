@@ -1,18 +1,24 @@
 console.log('Main process starting... code execution begun.')
-import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut, shell, dialog, desktopCapturer, screen } from 'electron'
 
 // Disable sandbox on Linux to fix AppImage SUID issues
 // Disable sandbox on Linux to fix AppImage SUID issues (only in production)
 if (process.platform === 'linux') {
   app.disableHardwareAcceleration()
+  const isWayland =
+    process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY)
+  if (isWayland) {
+    app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+  }
   if (app.isPackaged) {
     app.commandLine.appendSwitch('no-sandbox')
     app.commandLine.appendSwitch('disable-setuid-sandbox')
   }
 }
 import { join } from 'path'
-import { mkdir, writeFile, readdir, readFile, stat, rm } from 'fs/promises'
+import { mkdir, writeFile, readFile, readdir, stat, rm, rename } from 'fs/promises'
 import { existsSync } from 'fs'
+import { startBackend, stopBackend, getBackendHealth, getBackendUrl } from './backend-manager'
 
 // The built directory structure
 //
@@ -49,6 +55,18 @@ interface AppConfig {
   skipHotkey: string
   backHotkey: string
   darkMode: boolean
+  provider: string
+  defaultProjectLocation: string
+  exportFormat: string
+  exportTemplate: string
+  screenshotFormat: string
+  screenshotQuality: number
+  localOnly: boolean
+  encryptProjects: boolean
+  encryptionPassphrase: string
+  lastRegion: { x: number; y: number; width: number; height: number } | null
+  lastActiveProject: string
+  captureInProgress: boolean
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -57,6 +75,18 @@ const DEFAULT_CONFIG: AppConfig = {
   skipHotkey: 'CommandOrControl+Shift+N',
   backHotkey: 'CommandOrControl+Shift+B',
   darkMode: false,
+  provider: 'mistral',
+  defaultProjectLocation: '',
+  exportFormat: 'pdf',
+  exportTemplate: 'default',
+  screenshotFormat: 'png',
+  screenshotQuality: 90,
+  localOnly: false,
+  encryptProjects: false,
+  encryptionPassphrase: '',
+  lastRegion: null,
+  lastActiveProject: '',
+  captureInProgress: false,
 }
 
 let currentConfig: AppConfig = { ...DEFAULT_CONFIG }
@@ -89,6 +119,64 @@ async function saveConfig(config: AppConfig) {
   } catch (error) {
     console.error('Failed to save config:', error)
   }
+}
+
+// ---- Project encryption (at rest) ----
+import crypto from 'crypto'
+
+const ENC_MARKER = '__nulldraft_encrypted__'
+
+function deriveKey(passphrase: string, salt: Buffer): Buffer {
+  return crypto.scryptSync(passphrase, salt, 32)
+}
+
+function encryptJson(obj: unknown, passphrase: string): string {
+  const salt = crypto.randomBytes(16)
+  const iv = crypto.randomBytes(12)
+  const key = deriveKey(passphrase, salt)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  const plaintext = Buffer.from(JSON.stringify(obj), 'utf-8')
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return JSON.stringify({
+    [ENC_MARKER]: true,
+    salt: salt.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    data: encrypted.toString('base64'),
+  })
+}
+
+function decryptJson(raw: string, passphrase: string): any {
+  const wrapper = JSON.parse(raw)
+  if (!wrapper || !wrapper[ENC_MARKER]) {
+    return wrapper // not encrypted
+  }
+  if (!passphrase) {
+    throw new Error('Project is encrypted but no passphrase is configured')
+  }
+  const salt = Buffer.from(wrapper.salt, 'base64')
+  const iv = Buffer.from(wrapper.iv, 'base64')
+  const tag = Buffer.from(wrapper.tag, 'base64')
+  const data = Buffer.from(wrapper.data, 'base64')
+  const key = deriveKey(passphrase, salt)
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(tag)
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()])
+  return JSON.parse(decrypted.toString('utf-8'))
+}
+
+async function writeManifestFile(manifestPath: string, manifest: unknown) {
+  if (currentConfig.encryptProjects && currentConfig.encryptionPassphrase) {
+    await writeFile(manifestPath, encryptJson(manifest, currentConfig.encryptionPassphrase))
+  } else {
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+  }
+}
+
+async function readManifestFile(manifestPath: string): Promise<any> {
+  const raw = await readFile(manifestPath, 'utf-8')
+  return decryptJson(raw, currentConfig.encryptionPassphrase)
 }
 
 // Global Shortcut Management
@@ -133,8 +221,11 @@ function registerGlobalShortcuts() {
 }
 
 
-// Get projects base directory
+// Get projects base directory (respects configurable location)
 function getProjectsDir(): string {
+  if (currentConfig.defaultProjectLocation && currentConfig.defaultProjectLocation.trim()) {
+    return currentConfig.defaultProjectLocation
+  }
   return join(app.getPath('userData'), 'projects')
 }
 
@@ -201,7 +292,7 @@ function createMainWindow() {
     mainWindow.loadURL(url)
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(join(process.env.DIST, 'index.html'))
+    mainWindow.loadFile(join(process.env.DIST || '', 'index.html'))
   }
 
   mainWindow.on('closed', () => {
@@ -325,7 +416,17 @@ function createTray() {
 
 // Core Action Logic using standalone functions to be reused by IPC and Shortcuts
 
-async function performCapture(stepInfo?: { projectPath: string; stepNumber: number; stepTitle: string }) {
+interface CaptureOptions {
+  mode?: 'fullscreen' | 'window' | 'region' | 'display'
+  displayId?: number
+  region?: { x: number; y: number; width: number; height: number }
+  reuseLastRegion?: boolean
+}
+
+async function performCapture(
+  stepInfo?: { projectPath: string; stepNumber: number; stepTitle: string },
+  options?: CaptureOptions
+) {
   try {
     // Temporarily hide HUD to avoid capturing it
     const wasHudVisible = hudWindow?.isVisible() ?? false
@@ -335,6 +436,24 @@ async function performCapture(stepInfo?: { projectPath: string; stepNumber: numb
 
     // Wait for HUD to hide
     await new Promise(resolve => setTimeout(resolve, 200))
+
+    // Region mode: reuse last region or let the user draw one.
+    let regionToUse = options?.region
+    if (options?.mode === 'region' && !regionToUse) {
+      if (options?.reuseLastRegion && currentConfig.lastRegion) {
+        regionToUse = currentConfig.lastRegion
+      } else {
+        const selected = await selectRegion(options?.displayId)
+        if (!selected) {
+          if (wasHudVisible && hudWindow) hudWindow.show()
+          return { success: false, error: 'Region selection cancelled' }
+        }
+        regionToUse = selected
+        await saveConfig({ ...currentConfig, lastRegion: selected })
+      }
+    }
+
+    const ext = currentConfig.screenshotFormat === 'jpg' ? 'jpg' : 'png'
 
     // Generate filename based on step info or timestamp
     let filename: string
@@ -349,31 +468,32 @@ async function performCapture(stepInfo?: { projectPath: string; stepNumber: numb
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
         .slice(0, 30)
-      filename = `step-${paddedNumber}-${slug}.png`
+      filename = `step-${paddedNumber}-${slug}.${ext}`
       filepath = join(stepInfo.projectPath, filename)
     } else {
       // Fallback to timestamp naming in projects dir
       const now = new Date()
       const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      filename = `capture-${timestamp}.png`
+      filename = `capture-${timestamp}.${ext}`
       const projectsDir = getProjectsDir()
       await mkdir(projectsDir, { recursive: true })
       filepath = join(projectsDir, filename)
     }
 
-    // Use gnome-screenshot for Wayland support
-    const { exec } = await import('child_process')
-    const { promisify } = await import('util')
-    const execAsync = promisify(exec)
-
-    // TODO: Support other platforms
-    if (process.platform === 'linux') {
-      await execAsync(`gnome-screenshot -f "${filepath}"`)
-    } else {
-      // Fallback or specific impl for Mac/Win if needed (screenshot-desktop handles some)
-      // For now reusing Linux logic or fallback to screenshot-desktop
-      const screenshot = await import('screenshot-desktop')
-      await screenshot.default({ filename: filepath })
+    // Handle screenshot capturing based on platform
+    try {
+      const { captureScreenshot } = await import('./screenshot-helper')
+      await captureScreenshot(filepath, process.platform, {
+        mode: options?.mode || 'fullscreen',
+        displayId: options?.displayId,
+        region: regionToUse,
+        format: ext,
+        quality: currentConfig.screenshotQuality,
+      })
+    } catch (err) {
+      console.error("Failed to capture screenshot:", err)
+      // Throw so the IPC handler knows it failed
+      throw err
     }
 
 
@@ -440,9 +560,7 @@ async function performCapture(stepInfo?: { projectPath: string; stepNumber: numb
     if (stepInfo) {
       try {
         const manifestPath = join(stepInfo.projectPath, 'project.json')
-        const { readFile } = await import('fs/promises')
-        const manifestContent = await readFile(manifestPath, 'utf-8')
-        const manifest = JSON.parse(manifestContent)
+        const manifest = await readManifestFile(manifestPath)
 
         // Update the step with imagePath and captured status
         if (manifest.steps) {
@@ -455,7 +573,7 @@ async function performCapture(stepInfo?: { projectPath: string; stepNumber: numb
         }
         manifest.updatedAt = new Date().toISOString()
 
-        await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+        await writeManifestFile(manifestPath, manifest)
         console.log('Manifest updated for step:', stepInfo.stepNumber)
       } catch (manifestError) {
         console.error('Failed to update manifest:', manifestError)
@@ -510,6 +628,62 @@ function handleBackStep() {
 }
 
 
+// Region selection overlay: opens a fullscreen transparent window over a display
+// and lets the user drag a rectangle. Resolves with region in DIP coords or null.
+function selectRegion(displayId?: number): Promise<{ x: number; y: number; width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    let display = screen.getPrimaryDisplay()
+    if (displayId != null) {
+      const found = screen.getAllDisplays().find((d) => d.id === displayId)
+      if (found) display = found
+    }
+    const { x, y, width, height } = display.bounds
+
+    const overlay = new BrowserWindow({
+      x, y, width, height,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      hasShadow: false,
+      enableLargerThanScreen: true,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    })
+    overlay.setAlwaysOnTop(true, 'screen-saver')
+
+    const channel = `region-selected-${Date.now()}`
+    const html = `data:text/html,${encodeURIComponent(`
+      <html><head><style>
+        html,body{margin:0;height:100%;cursor:crosshair;background:rgba(0,0,0,0.25);overflow:hidden;user-select:none}
+        #sel{position:fixed;border:2px solid #3b82f6;background:rgba(59,130,246,0.2);display:none}
+        #hint{position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#fff;font-family:sans-serif;font-size:14px;background:rgba(0,0,0,0.6);padding:6px 12px;border-radius:8px}
+      </style></head><body>
+        <div id="hint">Drag to select a region — Esc to cancel</div>
+        <div id="sel"></div>
+        <script>
+          const { ipcRenderer } = require('electron')
+          let sx=0, sy=0, drawing=false
+          const sel = document.getElementById('sel')
+          document.addEventListener('mousedown', e=>{drawing=true; sx=e.clientX; sy=e.clientY; sel.style.display='block'})
+          document.addEventListener('mousemove', e=>{ if(!drawing) return; const x=Math.min(sx,e.clientX),y=Math.min(sy,e.clientY),w=Math.abs(e.clientX-sx),h=Math.abs(e.clientY-sy); sel.style.left=x+'px';sel.style.top=y+'px';sel.style.width=w+'px';sel.style.height=h+'px' })
+          document.addEventListener('mouseup', e=>{ if(!drawing) return; drawing=false; const x=Math.min(sx,e.clientX),y=Math.min(sy,e.clientY),w=Math.abs(e.clientX-sx),h=Math.abs(e.clientY-sy); ipcRenderer.send('${channel}', w>4&&h>4?{x,y,width:w,height:h}:null) })
+          document.addEventListener('keydown', e=>{ if(e.key==='Escape') ipcRenderer.send('${channel}', null) })
+        </script>
+      </body></html>`)}`
+    overlay.loadURL(html)
+
+    const finish = (region: any) => {
+      ipcMain.removeAllListeners(channel)
+      if (!overlay.isDestroyed()) overlay.close()
+      resolve(region)
+    }
+    ipcMain.once(channel, (_e, region) => finish(region))
+    overlay.on('closed', () => resolve(null))
+  })
+}
+
 app.whenReady().then(async () => {
   await loadConfig() // Load config before creating windows
 
@@ -524,6 +698,14 @@ app.whenReady().then(async () => {
   createHUDWindow()
   createTray()
   registerGlobalShortcuts()
+
+  // Start the Python backend (non-blocking; reuses an existing one in dev)
+  startBackend({
+    apiKey: currentConfig.apiKey || process.env.MISTRAL_API_KEY,
+    provider: currentConfig.provider,
+  }).then((res) => {
+    console.log('[backend] start result:', res)
+  }).catch((e) => console.error('[backend] start error:', e))
 
   // Config IPC Handlers
   ipcMain.handle('get-config', () => {
@@ -612,8 +794,8 @@ app.whenReady().then(async () => {
     return false
   })
 
-  ipcMain.handle('capture-screenshot', async (_event, stepInfo?: { projectPath: string; stepNumber: number; stepTitle: string }) => {
-    return await performCapture(stepInfo)
+  ipcMain.handle('capture-screenshot', async (_event, stepInfo?: { projectPath: string; stepNumber: number; stepTitle: string }, options?: CaptureOptions) => {
+    return await performCapture(stepInfo, options)
   })
 
   ipcMain.handle('skip-step', () => {
@@ -656,7 +838,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('save-project-manifest', async (_event, data: { projectPath: string; manifest: object }) => {
     try {
       const manifestPath = join(data.projectPath, 'project.json')
-      await writeFile(manifestPath, JSON.stringify(data.manifest, null, 2))
+      await writeManifestFile(manifestPath, data.manifest)
       console.log('Project manifest saved to:', manifestPath)
       return { success: true }
     } catch (error) {
@@ -688,8 +870,7 @@ app.whenReady().then(async () => {
           const manifestPath = join(projectPath, 'project.json')
 
           try {
-            const manifestContent = await readFile(manifestPath, 'utf-8')
-            const manifest = JSON.parse(manifestContent)
+            const manifest = await readManifestFile(manifestPath)
             const projectStat = await stat(manifestPath)
 
             projects.push({
@@ -719,8 +900,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('load-project', async (_event, projectPath: string) => {
     try {
       const manifestPath = join(projectPath, 'project.json')
-      const manifestContent = await readFile(manifestPath, 'utf-8')
-      const manifest = JSON.parse(manifestContent)
+      const manifest = await readManifestFile(manifestPath)
 
       return {
         success: true,
@@ -751,6 +931,170 @@ app.whenReady().then(async () => {
       console.error('Failed to delete project:', error)
       return { success: false, error: String(error) }
     }
+  })
+
+  // ---- Backend status ----
+  ipcMain.handle('get-backend-health', async () => {
+    return await getBackendHealth()
+  })
+
+  ipcMain.handle('get-backend-url', () => {
+    return getBackendUrl()
+  })
+
+  ipcMain.handle('restart-backend', async () => {
+    stopBackend()
+    await new Promise((r) => setTimeout(r, 500))
+    return await startBackend({ apiKey: currentConfig.apiKey, provider: currentConfig.provider })
+  })
+
+  // ---- Displays ----
+  ipcMain.handle('get-displays', () => {
+    return screen.getAllDisplays().map((d, idx) => ({
+      id: d.id,
+      index: idx,
+      label: d.label || `Display ${idx + 1}`,
+      bounds: d.bounds,
+      isPrimary: d.id === screen.getPrimaryDisplay().id,
+    }))
+  })
+
+  // ---- Capture window/region sources (for the renderer to pick) ----
+  ipcMain.handle('get-window-sources', async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 320, height: 200 },
+    })
+    return sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumbnail: s.thumbnail.toDataURL(),
+    }))
+  })
+
+  // ---- File helpers ----
+  ipcMain.handle('read-file-base64', async (_event, filePath: string) => {
+    try {
+      const buf = await readFile(filePath)
+      return { success: true, data: buf.toString('base64') }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('save-base64-image', async (_event, data: { filePath: string; base64: string }) => {
+    try {
+      const cleaned = data.base64.replace(/^data:image\/\w+;base64,/, '')
+      await writeFile(data.filePath, Buffer.from(cleaned, 'base64'))
+      return { success: true, filePath: data.filePath }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // ---- Open / reveal in file manager ----
+  ipcMain.handle('open-path', async (_event, targetPath: string) => {
+    const err = await shell.openPath(targetPath)
+    return { success: !err, error: err || undefined }
+  })
+
+  ipcMain.handle('show-item-in-folder', (_event, targetPath: string) => {
+    shell.showItemInFolder(targetPath)
+    return { success: true }
+  })
+
+  // ---- Pick a directory (for default project location) ----
+  ipcMain.handle('pick-directory', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false }
+    }
+    return { success: true, path: result.filePaths[0] }
+  })
+
+  // ---- Retake screenshot (archives the previous one to a history folder) ----
+  ipcMain.handle('retake-screenshot', async (_event, stepInfo: { projectPath: string; stepNumber: number; stepTitle: string; currentImage?: string }, options?: CaptureOptions) => {
+    try {
+      if (stepInfo.currentImage) {
+        const current = join(stepInfo.projectPath, stepInfo.currentImage)
+        if (existsSync(current)) {
+          const historyDir = join(stepInfo.projectPath, '.history')
+          await mkdir(historyDir, { recursive: true })
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+          const archived = join(historyDir, `${ts}-${stepInfo.currentImage}`)
+          try {
+            await rename(current, archived)
+          } catch {
+            // best effort
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to archive previous screenshot:', e)
+    }
+    return await performCapture(stepInfo, options)
+  })
+
+  // ---- Get history for a step ----
+  ipcMain.handle('get-screenshot-history', async (_event, projectPath: string) => {
+    try {
+      const historyDir = join(projectPath, '.history')
+      if (!existsSync(historyDir)) return { success: true, files: [] }
+      const files = await readdir(historyDir)
+      return { success: true, files }
+    } catch (error) {
+      return { success: false, error: String(error), files: [] }
+    }
+  })
+
+  // ---- Default project location helper ----
+  ipcMain.handle('get-default-project-location', () => {
+    return getProjectsDir()
+  })
+
+  // ---- Pick a file (e.g. logo) ----
+  ipcMain.handle('pick-file', async (_event, filters?: Array<{ name: string; extensions: string[] }>) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: filters || [{ name: 'All Files', extensions: ['*'] }],
+    })
+    if (result.canceled || result.filePaths.length === 0) return { success: false }
+    return { success: true, path: result.filePaths[0] }
+  })
+
+  // ---- Crash recovery / session tracking ----
+  ipcMain.handle('set-active-session', async (_event, data: { projectPath: string; inProgress: boolean }) => {
+    await saveConfig({
+      ...currentConfig,
+      lastActiveProject: data.projectPath || '',
+      captureInProgress: data.inProgress,
+    })
+    return true
+  })
+
+  ipcMain.handle('get-recovery-info', async () => {
+    if (currentConfig.captureInProgress && currentConfig.lastActiveProject) {
+      // Confirm the project still exists
+      const manifestPath = join(currentConfig.lastActiveProject, 'project.json')
+      if (existsSync(manifestPath)) {
+        try {
+          const manifest = await readManifestFile(manifestPath)
+          return {
+            recover: true,
+            projectPath: currentConfig.lastActiveProject,
+            name: manifest.name || manifest.projectName || 'Untitled',
+          }
+        } catch {
+          return { recover: false }
+        }
+      }
+    }
+    return { recover: false }
+  })
+
+  ipcMain.handle('clear-active-session', async () => {
+    await saveConfig({ ...currentConfig, captureInProgress: false })
+    return true
   })
 })
 

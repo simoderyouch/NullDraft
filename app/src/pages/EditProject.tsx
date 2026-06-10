@@ -3,12 +3,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, Loader2 } from 'lucide-react'
+import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, Loader2, Sparkles } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { v4 as uuidv4 } from 'uuid'
 import { Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
+import { suggestNextStep } from '@/lib/api'
 
 export default function EditProject() {
     const navigate = useNavigate()
@@ -19,6 +20,7 @@ export default function EditProject() {
     const [projectPath, setProjectPath] = useState<string | null>(null)
     const [steps, setSteps] = useState<Step[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [isSuggesting, setIsSuggesting] = useState(false)
 
     // Load project data on mount
     useEffect(() => {
@@ -79,6 +81,27 @@ export default function EditProject() {
                 .filter(s => s.id !== id)
                 .map((s, idx) => ({ ...s, number: idx + 1 }))
         )
+    }
+
+    const handleSuggestNext = async () => {
+        setIsSuggesting(true)
+        try {
+            const payload = steps.map((s) => ({ number: s.number, title: s.title, description: s.description }))
+            const { title, description } = await suggestNextStep(payload, steps.length - 1)
+            if (title || description) {
+                setSteps((prev) => [
+                    ...prev,
+                    { id: uuidv4(), number: prev.length + 1, title, description, imagePath: null, captured: false, skipped: false },
+                ])
+            } else {
+                alert('No suggestion returned.')
+            }
+        } catch (e) {
+            console.error(e)
+            alert('Failed to suggest next step. Is the backend configured?')
+        } finally {
+            setIsSuggesting(false)
+        }
     }
 
     const handleReorder = (newOrder: Step[]) => {
@@ -183,10 +206,16 @@ export default function EditProject() {
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h2 className="text-xl font-semibold">Steps</h2>
-                        <Button onClick={handleAddStep} variant="secondary" size="sm">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Step
-                        </Button>
+                        <div className="flex gap-2">
+                            <Button onClick={handleSuggestNext} variant="outline" size="sm" disabled={isSuggesting || steps.length === 0}>
+                                {isSuggesting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                                Suggest next (AI)
+                            </Button>
+                            <Button onClick={handleAddStep} variant="secondary" size="sm">
+                                <Plus className="h-4 w-4 mr-2" />
+                                Add Step
+                            </Button>
+                        </div>
                     </div>
 
                     <ScrollArea className="h-[calc(100vh-450px)] pr-4">

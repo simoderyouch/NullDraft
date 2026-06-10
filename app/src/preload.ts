@@ -23,10 +23,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showWindow: () => ipcRenderer.invoke('show-window'),
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
 
-  // Capture control (now accepts optional step info)
-  captureScreenshot: (stepInfo?: StepInfo) => ipcRenderer.invoke('capture-screenshot', stepInfo),
+  // Capture control (now accepts optional step info + capture options)
+  captureScreenshot: (stepInfo?: StepInfo, options?: any) =>
+    ipcRenderer.invoke('capture-screenshot', stepInfo, options),
+  retakeScreenshot: (stepInfo: any, options?: any) =>
+    ipcRenderer.invoke('retake-screenshot', stepInfo, options),
+  getScreenshotHistory: (projectPath: string) =>
+    ipcRenderer.invoke('get-screenshot-history', projectPath),
   skipStep: () => ipcRenderer.invoke('skip-step'),
   backStep: () => ipcRenderer.invoke('back-step'),
+
+  // Displays & capture sources
+  getDisplays: () => ipcRenderer.invoke('get-displays'),
+  getWindowSources: () => ipcRenderer.invoke('get-window-sources'),
+
+  // Backend
+  getBackendHealth: () => ipcRenderer.invoke('get-backend-health'),
+  getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
+  restartBackend: () => ipcRenderer.invoke('restart-backend'),
+
+  // File helpers
+  readFileBase64: (filePath: string) => ipcRenderer.invoke('read-file-base64', filePath),
+  saveBase64Image: (data: { filePath: string; base64: string }) =>
+    ipcRenderer.invoke('save-base64-image', data),
+  openPath: (targetPath: string) => ipcRenderer.invoke('open-path', targetPath),
+  showItemInFolder: (targetPath: string) => ipcRenderer.invoke('show-item-in-folder', targetPath),
+  pickDirectory: () => ipcRenderer.invoke('pick-directory'),
+  pickFile: (filters?: Array<{ name: string; extensions: string[] }>) =>
+    ipcRenderer.invoke('pick-file', filters),
+  getDefaultProjectLocation: () => ipcRenderer.invoke('get-default-project-location'),
+
+  // Crash recovery / session tracking
+  setActiveSession: (data: { projectPath: string; inProgress: boolean }) =>
+    ipcRenderer.invoke('set-active-session', data),
+  getRecoveryInfo: () => ipcRenderer.invoke('get-recovery-info'),
+  clearActiveSession: () => ipcRenderer.invoke('clear-active-session'),
 
   // Project management
   initProject: (projectName: string) => ipcRenderer.invoke('init-project', projectName),

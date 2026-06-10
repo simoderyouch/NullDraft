@@ -8,6 +8,12 @@ export interface Step {
     imagePath: string | null
     captured: boolean
     skipped: boolean
+    notes?: string
+    generated_description?: string
+    generated_caption?: string
+    ocr_text?: string
+    validation?: { pass: boolean; confidence: number; message: string } | null
+    branches?: Array<{ condition: string; title: string; description: string }>
 }
 
 export interface ProjectData {

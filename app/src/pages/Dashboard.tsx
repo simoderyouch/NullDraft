@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router-dom'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { FileText, FolderOpen, Settings, Upload, Trash2 } from 'lucide-react'
+import { FileText, FolderOpen, Settings, Upload, Trash2, LayoutTemplate, FilePlus2, RotateCcw, X } from 'lucide-react'
 import { motion } from 'framer-motion'
 import logo from '@/assets/h-logo.svg'
+import { PROJECT_TEMPLATES } from '@/lib/templates'
 
 interface RecentProject {
   id: string
@@ -37,6 +38,8 @@ export default function Dashboard() {
   const [isDragging, setIsDragging] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [recovery, setRecovery] = useState<{ projectPath: string; name: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Load recent projects on mount
   useEffect(() => {
@@ -53,7 +56,26 @@ export default function Dashboard() {
       }
     }
     loadProjects()
+
+    // Crash recovery: check for an interrupted capture session.
+    window.electronAPI.getRecoveryInfo().then((info) => {
+      if (info?.recover && info.projectPath) {
+        setRecovery({ projectPath: info.projectPath, name: info.name || 'Untitled' })
+      }
+    }).catch(() => {})
   }, [])
+
+  const handleResume = () => {
+    if (recovery) {
+      window.electronAPI.clearActiveSession()
+      navigate(`/review?project=${encodeURIComponent(recovery.projectPath)}`)
+    }
+  }
+
+  const handleDismissRecovery = () => {
+    window.electronAPI.clearActiveSession()
+    setRecovery(null)
+  }
 
   const handleDeleteProject = async (e: React.MouseEvent, projectPath: string) => {
     e.stopPropagation() // Prevent card click
@@ -85,14 +107,21 @@ export default function Dashboard() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    // TODO: Handle file drop logic
-    console.log('File dropped')
-    navigate('/review')
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      navigate('/create', { state: { droppedFile: file } })
+    }
   }
 
   const handleFileSelect = () => {
-    // TODO: Implement file selection logic
-    navigate('/review')
+    fileInputRef.current?.click()
+  }
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      navigate('/create', { state: { droppedFile: file } })
+    }
   }
 
   return (
@@ -105,6 +134,33 @@ export default function Dashboard() {
             Turn instructions into step-by-step screenshot documentation
           </p>
         </div>
+
+        {/* Crash recovery banner */}
+        {recovery && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 flex items-center justify-between gap-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3"
+          >
+            <div className="flex items-center gap-3">
+              <RotateCcw className="h-5 w-5 text-amber-400" />
+              <div>
+                <p className="font-medium">Resume interrupted session?</p>
+                <p className="text-sm text-muted-foreground">
+                  Capture was in progress for "{recovery.name}" when the app last closed.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={handleResume} className="gap-2">
+                <RotateCcw className="h-4 w-4" /> Resume
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDismissRecovery}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </motion.div>
+        )}
 
         {/* Primary Actions */}
         <div className="flex justify-center gap-4 mb-12">
@@ -120,9 +176,25 @@ export default function Dashboard() {
             variant="outline"
             size="lg"
             className="h-12 px-6"
+            onClick={() => {
+              if (recentProjects.length > 0) {
+                navigate(`/edit?project=${encodeURIComponent(recentProjects[0].path)}`)
+              } else {
+                handleFileSelect()
+              }
+            }}
           >
             <FolderOpen className="mr-2 h-5 w-5" />
             Open Existing
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => navigate('/enhance')}
+            className="h-12 px-6"
+          >
+            <FilePlus2 className="mr-2 h-5 w-5" />
+            Enhance Document
           </Button>
           <Button
             variant="ghost"
@@ -151,6 +223,13 @@ export default function Dashboard() {
             onDrop={handleDrop}
             onClick={handleFileSelect}
           >
+            <input
+              type="file"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={handleFileInput}
+              accept=".txt,.md,.pdf,.docx,.tex"
+            />
             <CardContent className="p-16 text-center">
               <motion.div
                 animate={{ y: isDragging ? -5 : 0 }}
@@ -173,6 +252,28 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </motion.div>
+
+        {/* Templates Library */}
+        <div className="mt-12">
+          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
+            <LayoutTemplate className="h-6 w-6" /> Start from a template
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {PROJECT_TEMPLATES.map((tpl) => (
+              <Card
+                key={tpl.id}
+                className="cursor-pointer hover:shadow-lg hover:border-primary/50 transition-all"
+                onClick={() => navigate('/create', { state: { templateSteps: tpl.steps, templateName: tpl.name } })}
+              >
+                <CardHeader>
+                  <CardTitle className="text-base">{tpl.name}</CardTitle>
+                  <CardDescription>{tpl.description}</CardDescription>
+                  <p className="text-xs text-muted-foreground mt-2">{tpl.steps.length} steps</p>
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+        </div>
 
         {/* Recent Projects */}
         {!isLoading && recentProjects.length > 0 && (

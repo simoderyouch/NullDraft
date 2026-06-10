@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import CreateProject from './pages/CreateProject'
@@ -5,6 +6,8 @@ import EditProject from './pages/EditProject'
 import Review from './pages/Review'
 import Capture from './pages/Capture'
 import Export from './pages/Export'
+import Annotate from './pages/Annotate'
+import EnhanceDocument from './pages/EnhanceDocument'
 import Settings from './pages/Settings'
 import FloatingHUD from './components/FloatingHUD'
 import { Button } from './components/ui/button'
@@ -12,6 +15,19 @@ import { X, Minus } from 'lucide-react'
 
 function App() {
 
+  useEffect(() => {
+    async function applyTheme() {
+      try {
+        if (window.electronAPI?.getConfig) {
+          const cfg = await window.electronAPI.getConfig()
+          document.documentElement.classList.toggle('dark', !!cfg.darkMode)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    applyTheme()
+  }, [])
 
   const isHUDWindow = window.location.hash === '#/hud'
 
@@ -80,6 +96,8 @@ function App() {
           <Route path="/review" element={<Review />} />
           <Route path="/capture" element={<Capture />} />
           <Route path="/export" element={<Export />} />
+          <Route path="/annotate" element={<Annotate />} />
+          <Route path="/enhance" element={<EnhanceDocument />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

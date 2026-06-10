@@ -42,6 +42,8 @@ export default function Capture() {
     // Hide HUD window
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.hideHUD()
+      // Capture finished normally — clear the crash-recovery flag.
+      window.electronAPI.clearActiveSession?.()
     }
     // Navigate to export with project path
     if (projectPath) {
