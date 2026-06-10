@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Camera, ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { Camera, ArrowLeft, CheckCircle2, Home } from 'lucide-react'
 
 export default function Capture() {
   const navigate = useNavigate()
@@ -31,9 +31,14 @@ export default function Capture() {
       window.electronAPI.onCaptureCompleted(() => {
         handleFinish()
       })
+      // Listen for exit-to-home triggered from the HUD overlay.
+      window.electronAPI.onCaptureExitHome?.(() => {
+        navigate('/')
+      })
 
       return () => {
         window.electronAPI.removeCaptureCompletedListener()
+        window.electronAPI.removeCaptureExitHomeListener?.()
       }
     }
   }, [])
@@ -67,20 +72,38 @@ export default function Capture() {
     }
   }
 
+  const handleHome = () => {
+    // Exit capture mode entirely and return to the dashboard.
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.hideHUD()
+    }
+    navigate('/')
+  }
+
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <Button
-            variant="ghost"
-            onClick={handleCancel}
-            className="gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Review
-          </Button>
-          <h1 className="text-3xl font-bold">Capture Mode</h1>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              onClick={handleHome}
+              className="gap-2"
+            >
+              <Home className="h-4 w-4" />
+              Home
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={handleCancel}
+              className="gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Review
+            </Button>
+          </div>
+          <h1 className="text-3xl font-bold gradient-text">Capture Mode</h1>
           <Button
             onClick={handleFinish}
             className="gap-2"

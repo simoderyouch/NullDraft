@@ -7,10 +7,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { ArrowLeft, ArrowRight, Loader2, Check, Image, X, Sparkles, RefreshCw, Pencil, ScanText, Crop, Lock } from 'lucide-react'
 import { Step } from '@/lib/projectTypes'
 import { generateScreenshotDescription, ocrImage, smartCrop, isLocalOnly, LocalOnlyError } from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
+import WorkflowSteps from '@/components/WorkflowSteps'
 
 export default function Review() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { toast } = useToast()
   const [searchParams] = useSearchParams()
   const projectPathFromQuery = searchParams.get('project')
 
@@ -114,9 +117,9 @@ export default function Review() {
   const reportAiError = (e: unknown, fallback: string) => {
     console.error(e)
     if (e instanceof LocalOnlyError) {
-      alert(e.message)
+      toast({ variant: 'info', title: 'Local-only mode', description: e.message })
     } else {
-      alert(fallback)
+      toast({ variant: 'error', title: 'AI request failed', description: fallback })
     }
   }
 
@@ -127,6 +130,7 @@ export default function Review() {
     try {
       const { text } = await ocrImage(img)
       updateStep(s.id, { ocr_text: text })
+      toast({ variant: 'success', title: 'Text extracted', description: text ? `${text.length} characters captured.` : 'No text found in image.' })
     } catch (e) {
       reportAiError(e, 'Failed to extract text (OCR).')
     } finally {
@@ -141,6 +145,7 @@ export default function Review() {
     try {
       await smartCrop(s.title, img, { apply: true, outputPath: img })
       setImageVersion((v) => ({ ...v, [s.id]: (v[s.id] || 0) + 1 }))
+      toast({ variant: 'success', title: 'Smart crop applied', description: 'Image cropped to the relevant region.' })
     } catch (e) {
       reportAiError(e, 'Failed to smart-crop.')
     } finally {
@@ -266,7 +271,7 @@ export default function Review() {
             Edit Steps
           </Button>
           <div className="text-center">
-            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">Review Steps</h1>
+            <h1 className="text-3xl font-bold gradient-text">Review Steps</h1>
             <p className="text-sm text-muted-foreground mt-1">
               {capturedCount > 0 ? `${capturedCount} of ${steps.length} steps captured` : 'Review your steps before starting capture'}
             </p>
@@ -279,7 +284,7 @@ export default function Review() {
                 handleStartCapture()
               }
             }}
-            className="gap-2 hover:shadow-primary/40 transition-shadow"
+            className="gap-2"
             disabled={steps.length === 0}
             size="lg"
             variant={!hasUncapturedSteps ? 'secondary' : 'default'}
@@ -288,6 +293,8 @@ export default function Review() {
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
+
+        <WorkflowSteps current="review" projectPath={loadedProjectPath} className="mb-2" />
 
         {/* Progress bar */}
         <div className="space-y-1">

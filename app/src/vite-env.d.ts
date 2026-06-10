@@ -99,8 +99,11 @@ interface Window {
     onStepBack: (callback: () => void) => void
     removeStepBackListener: () => void
     completeCapture: () => Promise<boolean>
+    exitCaptureToHome: () => Promise<boolean>
     onCaptureCompleted: (callback: () => void) => void
     removeCaptureCompletedListener: () => void
+    onCaptureExitHome: (callback: () => void) => void
+    removeCaptureExitHomeListener: () => void
 
     // Config
     getConfig: () => Promise<AppConfig>

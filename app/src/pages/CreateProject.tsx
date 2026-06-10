@@ -10,10 +10,12 @@ import { v4 as uuidv4 } from 'uuid'
 import { Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
 import { uploadAssessmentAndGenerateSteps } from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
 
 export default function CreateProject() {
     const navigate = useNavigate()
     const location = useLocation()
+    const { toast } = useToast()
 
     // Initialize from location.state if returning from Review, otherwise default
     const [projectName, setProjectName] = useState(() =>
@@ -54,10 +56,11 @@ export default function CreateProject() {
                     captured: false,
                     skipped: false
                 })))
+                toast({ variant: 'success', title: 'Steps generated', description: `${data.steps.length} step(s) created from your file.` })
             }
         } catch (error) {
             console.error('Failed to generate steps:', error)
-            alert('Failed to generate steps from file. Is the backend running and the API key set?')
+            toast({ variant: 'error', title: 'Could not generate steps', description: 'Is the backend running and the API key set?' })
         } finally {
             setIsUploading(false)
         }
@@ -150,7 +153,7 @@ export default function CreateProject() {
                         <ArrowLeft className="h-4 w-4" />
                         Back
                     </Button>
-                    <h1 className="text-3xl font-bold">New Project</h1>
+                    <h1 className="text-3xl font-bold gradient-text">New Project</h1>
 
                     <div className="flex justify-end pt-4 border-t border-white/10">
                         <Button

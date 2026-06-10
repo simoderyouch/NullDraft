@@ -5,14 +5,16 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, Loader2, Sparkles } from 'lucide-react'
 import { Label } from '@/components/ui/label'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { v4 as uuidv4 } from 'uuid'
 import { Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
 import { suggestNextStep } from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
+import WorkflowSteps from '@/components/WorkflowSteps'
 
 export default function EditProject() {
     const navigate = useNavigate()
+    const { toast } = useToast()
     const [searchParams] = useSearchParams()
     const projectPathFromQuery = searchParams.get('project')
 
@@ -93,12 +95,13 @@ export default function EditProject() {
                     ...prev,
                     { id: uuidv4(), number: prev.length + 1, title, description, imagePath: null, captured: false, skipped: false },
                 ])
+                toast({ variant: 'success', title: 'Step suggested', description: title || 'Added a new step.' })
             } else {
-                alert('No suggestion returned.')
+                toast({ variant: 'info', title: 'No suggestion', description: 'The AI did not return a next step.' })
             }
         } catch (e) {
             console.error(e)
-            alert('Failed to suggest next step. Is the backend configured?')
+            toast({ variant: 'error', title: 'Suggestion failed', description: 'Is the backend configured with an API key?' })
         } finally {
             setIsSuggesting(false)
         }
@@ -171,7 +174,7 @@ export default function EditProject() {
                         <ArrowLeft className="h-4 w-4" />
                         Back
                     </Button>
-                    <h1 className="text-3xl font-bold">Edit Project</h1>
+                    <h1 className="text-3xl font-bold gradient-text">Edit Project</h1>
 
                     <Button
                         size="lg"
@@ -183,6 +186,8 @@ export default function EditProject() {
                         <ArrowRight className="h-4 w-4" />
                     </Button>
                 </div>
+
+                <WorkflowSteps current="define" projectPath={projectPath} />
 
                 <Card className="border-white/10">
                     <CardHeader>
@@ -218,19 +223,17 @@ export default function EditProject() {
                         </div>
                     </div>
 
-                    <ScrollArea className="h-[calc(100vh-450px)] pr-4">
-                        <Reorder.Group axis="y" values={steps} onReorder={handleReorder} className="space-y-4 pb-8">
-                            {steps.map((step) => (
-                                <StepCard
-                                    key={step.id}
-                                    step={step}
-                                    stepsLength={steps.length}
-                                    onStepChange={handleStepChange}
-                                    onRemoveStep={handleRemoveStep}
-                                />
-                            ))}
-                        </Reorder.Group>
-                    </ScrollArea>
+                    <Reorder.Group axis="y" values={steps} onReorder={handleReorder} className="space-y-4 pb-8">
+                        {steps.map((step) => (
+                            <StepCard
+                                key={step.id}
+                                step={step}
+                                stepsLength={steps.length}
+                                onStepChange={handleStepChange}
+                                onRemoveStep={handleRemoveStep}
+                            />
+                        ))}
+                    </Reorder.Group>
                 </div>
             </div>
         </div>

@@ -123,7 +123,7 @@ export default function EnhanceDocument() {
           <Button variant="ghost" onClick={() => navigate('/')} className="gap-2">
             <ArrowLeft className="h-4 w-4" /> Home
           </Button>
-          <h1 className="text-3xl font-bold">Enhance Existing Document</h1>
+          <h1 className="text-3xl font-bold gradient-text">Enhance Existing Document</h1>
           <div className="w-20" />
         </div>
 

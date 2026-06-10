@@ -822,6 +822,20 @@ app.whenReady().then(async () => {
     return true
   })
 
+  // Exit capture mode and return to the dashboard.
+  ipcMain.handle('exit-capture-home', () => {
+    console.log('Exit capture to home requested')
+    if (hudWindow) {
+      hudWindow.hide()
+    }
+    if (mainWindow) {
+      mainWindow.show()
+      mainWindow.focus()
+      mainWindow.webContents.send('capture-exit-home')
+    }
+    return true
+  })
+
   // Initialize a new project folder
   ipcMain.handle('init-project', async (_event, projectName: string) => {
     try {

@@ -128,6 +128,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Complete capture
   completeCapture: () => ipcRenderer.invoke('complete-capture'),
 
+  // Exit capture mode straight to the dashboard
+  exitCaptureToHome: () => ipcRenderer.invoke('exit-capture-home'),
+
   // Listen for capture completion (in main window)
   onCaptureCompleted: (callback: () => void) => {
     ipcRenderer.on('capture-completed', () => callback())
@@ -135,6 +138,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   removeCaptureCompletedListener: () => {
     ipcRenderer.removeAllListeners('capture-completed')
+  },
+
+  // Listen for exit-to-home (in main window)
+  onCaptureExitHome: (callback: () => void) => {
+    ipcRenderer.on('capture-exit-home', () => callback())
+  },
+
+  removeCaptureExitHomeListener: () => {
+    ipcRenderer.removeAllListeners('capture-exit-home')
   },
 
   // Config

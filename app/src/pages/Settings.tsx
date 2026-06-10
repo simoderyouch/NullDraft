@@ -7,9 +7,11 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { ArrowLeft, Save, RotateCcw, Key, Keyboard, Palette, FolderOpen, FileOutput, Camera, ShieldCheck, Loader2 } from 'lucide-react'
+import { useToast } from '@/components/ui/toast'
 
 export default function Settings() {
   const navigate = useNavigate()
+  const { toast } = useToast()
   const [apiKey, setApiKey] = useState('')
   const [provider, setProvider] = useState('mistral')
   const [captureHotkey, setCaptureHotkey] = useState('CommandOrControl+Shift+S')
@@ -65,7 +67,7 @@ export default function Settings() {
   const handleSave = async () => {
     try {
       if (encryptProjects && !encryptionPassphrase.trim()) {
-        alert('Please set a passphrase to enable project encryption.')
+        toast({ variant: 'error', title: 'Passphrase required', description: 'Set a passphrase to enable project encryption.' })
         return
       }
       const config = {
@@ -77,10 +79,11 @@ export default function Settings() {
       }
       await window.electronAPI.saveConfig(config as any)
       document.documentElement.classList.toggle('dark', darkMode)
-      console.log('Settings saved')
+      toast({ variant: 'success', title: 'Settings saved', description: 'Your preferences have been updated.' })
       navigate('/')
     } catch (e) {
       console.error("Failed to save settings", e)
+      toast({ variant: 'error', title: 'Could not save settings', description: e instanceof Error ? e.message : String(e) })
     }
   }
 
@@ -126,7 +129,7 @@ export default function Settings() {
             <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
-          <h1 className="text-3xl font-bold">Settings</h1>
+          <h1 className="text-3xl font-bold gradient-text">Settings</h1>
           <div className="w-20" /> {/* Spacer for centering */}
         </div>
 

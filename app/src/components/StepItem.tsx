@@ -43,7 +43,7 @@ export default function StepItem({
   return (
     <Card
       className={cn(
-        "mb-3 transition-all hover:shadow-md border-muted/40",
+        "mb-3 transition-colors border-muted/40 hover:border-muted/70",
         isDragging && "shadow-lg scale-[1.02] border-primary/20",
         isEditing && "border-primary/50"
       )}

@@ -6,6 +6,7 @@ import { FileText, FolderOpen, Settings, Upload, Trash2, LayoutTemplate, FilePlu
 import { motion } from 'framer-motion'
 import logo from '@/assets/h-logo.svg'
 import { PROJECT_TEMPLATES } from '@/lib/templates'
+import { useToast } from '@/components/ui/toast'
 
 interface RecentProject {
   id: string
@@ -35,6 +36,7 @@ function formatRelativeTime(dateString: string): string {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { toast } = useToast()
   const [isDragging, setIsDragging] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -84,13 +86,14 @@ export default function Dashboard() {
         const result = await window.electronAPI.deleteProject(projectPath)
         if (result.success) {
           setRecentProjects(prev => prev.filter(p => p.path !== projectPath))
+          toast({ variant: 'success', title: 'Project deleted' })
         } else {
           console.error('Failed to delete project:', result.error)
-          alert('Failed to delete project: ' + result.error)
+          toast({ variant: 'error', title: 'Delete failed', description: result.error })
         }
       } catch (error) {
         console.error('Error deleting project:', error)
-        alert('An error occurred while deleting the project.')
+        toast({ variant: 'error', title: 'Delete failed', description: 'An error occurred while deleting the project.' })
       }
     }
   }
@@ -128,10 +131,10 @@ export default function Dashboard() {
     <div className="min-h-screen p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-12">
-          <img src={logo} alt="NullDraft Logo" className=" h-[10rem] mx-auto mb-2" />
-          <p className="text-lg text-muted-foreground">
-            Turn instructions into step-by-step screenshot documentation
+        <div className="text-center mb-12 animate-fade-up">
+          <img src={logo} alt="NullDraft Logo" className="h-[10rem] mx-auto mb-2 animate-float" />
+          <p className="text-lg text-muted-foreground max-w-xl mx-auto">
+            Turn instructions into polished, screenshot-rich technical documents
           </p>
         </div>
 
@@ -163,7 +166,7 @@ export default function Dashboard() {
         )}
 
         {/* Primary Actions */}
-        <div className="flex justify-center gap-4 mb-12">
+        <div className="flex justify-center flex-wrap gap-4 mb-12 animate-fade-up" style={{ animationDelay: '80ms' }}>
           <Button
             size="lg"
             onClick={() => navigate('/create')}
@@ -243,10 +246,9 @@ export default function Dashboard() {
                   or click to browse
                 </p>
                 <div className="flex justify-center gap-2 text-sm text-muted-foreground">
-                  <span className="px-2 py-1 bg-muted rounded">.pdf</span>
-                  <span className="px-2 py-1 bg-muted rounded">.docx</span>
-                  <span className="px-2 py-1 bg-muted rounded">.txt</span>
-                  <span className="px-2 py-1 bg-muted rounded">.tex</span>
+                  {['.pdf', '.docx', '.txt', '.tex'].map((ext) => (
+                    <span key={ext} className="px-2.5 py-1 rounded-full border border-white/10 bg-white/5 font-mono text-xs">{ext}</span>
+                  ))}
                 </div>
               </motion.div>
             </CardContent>
@@ -256,13 +258,13 @@ export default function Dashboard() {
         {/* Templates Library */}
         <div className="mt-12">
           <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
-            <LayoutTemplate className="h-6 w-6" /> Start from a template
+            <LayoutTemplate className="h-6 w-6 text-primary" /> Start from a template
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {PROJECT_TEMPLATES.map((tpl) => (
               <Card
                 key={tpl.id}
-                className="cursor-pointer hover:shadow-lg hover:border-primary/50 transition-all"
+                className="cursor-pointer card-hover"
                 onClick={() => navigate('/create', { state: { templateSteps: tpl.steps, templateName: tpl.name } })}
               >
                 <CardHeader>
@@ -283,11 +285,11 @@ export default function Dashboard() {
               {recentProjects.map((project) => (
                 <Card
                   key={project.id}
-                  className="cursor-pointer hover:shadow-lg transition-shadow"
+                  className="cursor-pointer card-hover group"
                   onClick={() => navigate(`/edit?project=${encodeURIComponent(project.path)}`)}
                 >
                   <CardHeader className="relative pr-12">
-                    <CardTitle className="text-lg">{project.name}</CardTitle>
+                    <CardTitle className="text-lg group-hover:text-primary transition-colors">{project.name}</CardTitle>
                     <CardDescription>
                       {project.stepCount} steps • {formatRelativeTime(project.lastModified)}
                     </CardDescription>

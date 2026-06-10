@@ -11,6 +11,7 @@ import EnhanceDocument from './pages/EnhanceDocument'
 import Settings from './pages/Settings'
 import FloatingHUD from './components/FloatingHUD'
 import { Button } from './components/ui/button'
+import { ToastProvider } from './components/ui/toast'
 import { X, Minus } from 'lucide-react'
 
 function App() {
@@ -57,6 +58,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <ToastProvider>
       <div className="min-h-screen relative " >
         {/* Drag Region */}
         <div className="absolute top-0 !cursor-grab left-0 right-0 h-[4rem] z-40" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
@@ -102,6 +104,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
+      </ToastProvider>
     </BrowserRouter>
   )
 }

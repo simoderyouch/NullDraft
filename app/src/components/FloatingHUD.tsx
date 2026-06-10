@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { Camera, ArrowRight, ArrowLeft, Check, Loader2, CheckCircle2, Minimize2, Maximize2, StickyNote } from 'lucide-react'
+import { Camera, ArrowRight, ArrowLeft, Check, Loader2, CheckCircle2, Minimize2, Maximize2, StickyNote, Home } from 'lucide-react'
 
 interface StepData {
   id: string
@@ -125,6 +125,12 @@ export default function FloatingHUD() {
   const handleFinish = useCallback(() => {
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.completeCapture()
+    }
+  }, [])
+
+  const handleExitHome = useCallback(() => {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      window.electronAPI.exitCaptureToHome?.()
     }
   }, [])
 
@@ -263,6 +269,9 @@ export default function FloatingHUD() {
             <Button size="icon" variant="ghost" onClick={() => setMiniMode(false)} className="h-8 w-8 text-white/70 hover:bg-white/10">
               <Maximize2 className="h-4 w-4" />
             </Button>
+            <Button size="icon" variant="ghost" onClick={handleExitHome} className="h-8 w-8 text-white/70 hover:bg-white/10" title="Exit to home">
+              <Home className="h-4 w-4" />
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -278,6 +287,9 @@ export default function FloatingHUD() {
               Step {currentStepIndex + 1} of {total}
             </CardTitle>
             <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+              <Button size="icon" variant="ghost" onClick={handleExitHome} className="h-6 w-6 text-white/70 hover:bg-white/10" title="Exit to home">
+                <Home className="h-3.5 w-3.5" />
+              </Button>
               <Button size="icon" variant="ghost" onClick={() => setMiniMode(true)} className="h-6 w-6 text-white/70 hover:bg-white/10" title="Mini mode">
                 <Minimize2 className="h-3.5 w-3.5" />
               </Button>
