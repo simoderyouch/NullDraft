@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ArrowLeft, Download, FileText, FileCode, FileType, File, FileJson, Sparkles, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon, X } from 'lucide-react'
-import { Step } from '@/lib/projectTypes'
+import { ProjectLanguage, Step } from '@/lib/projectTypes'
 import { generateReport, generateScreenshotDescription, generateCaptions } from '@/lib/api'
+import { resolveConfiguredLanguage } from '@/lib/language'
 import { useToast } from '@/components/ui/toast'
 import WorkflowSteps from '@/components/WorkflowSteps'
 
@@ -36,6 +37,9 @@ export default function Export() {
 
   const [steps, setSteps] = useState<Step[]>(location.state?.steps || [])
   const [projectName, setProjectName] = useState(location.state?.projectName || 'documentation')
+  const [language, setLanguage] = useState<ProjectLanguage>(() =>
+    location.state?.language || { code: 'en', name: 'English' }
+  )
   const [projectPath, setProjectPath] = useState<string | null>(
     location.state?.projectPath || projectPathFromQuery || null
   )
@@ -60,6 +64,7 @@ export default function Export() {
         const cfg = await window.electronAPI.getConfig()
         if (cfg.exportFormat) setSelectedFormat(cfg.exportFormat as ExportFormat)
         if (cfg.exportTemplate) setSelectedTemplate(cfg.exportTemplate)
+        setLanguage(await resolveConfiguredLanguage(location.state?.language || language))
       } catch { /* ignore */ }
 
       if (projectPathFromQuery && (!location.state?.steps)) {
@@ -68,18 +73,20 @@ export default function Export() {
           setProjectName(result.project.name || result.project.projectName || 'documentation')
           setFileName(result.project.name || 'documentation')
           setProjectPath(projectPathFromQuery)
+          setLanguage(await resolveConfiguredLanguage(result.project.language))
           if (result.project.steps) {
             setSteps(result.project.steps.map((s: any) => ({
               id: s.id || crypto.randomUUID(),
               number: s.number,
               title: s.title,
+              caption: s.caption || s.generated_caption || s.title || '',
               description: s.description || '',
               imagePath: s.imagePath,
               captured: !!s.imagePath,
               skipped: s.skipped || false,
               notes: s.notes || '',
               generated_description: s.generated_description || '',
-              generated_caption: s.generated_caption || '',
+              generated_caption: s.generated_caption || s.caption || '',
               ocr_text: s.ocr_text || '',
               validation: s.validation || null,
               branches: s.branches || [],
@@ -102,9 +109,10 @@ export default function Export() {
       id: s.id,
       number: s.number,
       title: s.title,
+      caption: s.caption || '',
       description: s.description,
       generated_description: s.generated_description || '',
-      generated_caption: s.generated_caption || '',
+      generated_caption: s.generated_caption || s.caption || '',
       notes: s.notes || '',
       ocr_text: s.ocr_text || '',
       image_path: absImage(s),
@@ -120,16 +128,18 @@ export default function Export() {
 
   const handleGenerateAI = async () => {
     setIsGeneratingAI(true)
-    setStatus('Generating AI descriptions...')
+    setStatus('Regenerating AI descriptions...')
     try {
+      const activeLanguage = await resolveConfiguredLanguage(language)
+      setLanguage(activeLanguage)
       const updated = [...steps]
       for (let i = 0; i < updated.length; i++) {
         const s = updated[i]
         const img = absImage(s)
-        if (img && !s.generated_description) {
+        if (img) {
           try {
             setStatus(`Describing step ${s.number}: ${s.title}...`)
-            const { description } = await generateScreenshotDescription(s.title, img)
+            const { description } = await generateScreenshotDescription(s.title, img, activeLanguage)
             updated[i] = { ...s, generated_description: description }
           } catch (e) {
             console.error('describe failed for step', s.number, e)
@@ -141,9 +151,10 @@ export default function Export() {
       try {
         const { captions } = await generateCaptions(
           updated.filter((s) => absImage(s)).map((s) => ({
-            id: s.id, title: s.title, description: s.description,
+            id: s.id, title: s.title, caption: s.caption || '', description: s.description,
             generated_description: s.generated_description || '',
-          }))
+          })),
+          activeLanguage
         )
         const capMap = new Map(captions.map((c) => [c.id, c.caption]))
         for (let i = 0; i < updated.length; i++) {
@@ -163,11 +174,12 @@ export default function Export() {
             name: projectName,
             projectName,
             updatedAt: new Date().toISOString(),
+            language: activeLanguage,
             steps: updated.map((s) => ({
-              id: s.id, number: s.number, title: s.title, description: s.description,
+              id: s.id, number: s.number, title: s.title, caption: s.caption || '', description: s.description,
               imagePath: s.imagePath, captured: !!s.imagePath, skipped: s.skipped,
               notes: s.notes || '', generated_description: s.generated_description || '',
-              generated_caption: s.generated_caption || '',
+              generated_caption: s.generated_caption || s.caption || '',
               ocr_text: s.ocr_text || '', validation: s.validation || null,
               branches: s.branches || [],
             })),
@@ -175,7 +187,7 @@ export default function Export() {
         })
       }
       setStatus('AI text generated.')
-      toast({ variant: 'success', title: 'AI text generated', description: 'Descriptions and captions are ready.' })
+      toast({ variant: 'success', title: 'AI text regenerated', description: 'Descriptions and captions now match the project language.' })
     } catch (e) {
       console.error(e)
       setStatus('Failed to generate AI text. Is the backend running?')
@@ -190,6 +202,8 @@ export default function Export() {
     setStatus('Exporting...')
     setLastExportPath(null)
     try {
+      const activeLanguage = await resolveConfiguredLanguage(language)
+      setLanguage(activeLanguage)
       const outDir = projectPath || (await window.electronAPI.getDefaultProjectLocation())
       const outputPath = `${outDir}/${fileName}`
       const result = await generateReport({
@@ -202,6 +216,7 @@ export default function Export() {
         includeLof,
         includeNotes,
         includeNarrative,
+        language: activeLanguage,
         branding: {
           title: projectName,
           author,

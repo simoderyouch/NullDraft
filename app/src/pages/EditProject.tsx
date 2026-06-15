@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, Loader2, Sparkles } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { v4 as uuidv4 } from 'uuid'
-import { Step } from '@/lib/projectTypes'
+import { ProjectLanguage, Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
 import { suggestNextStep } from '@/lib/api'
+import { resolveConfiguredLanguage } from '@/lib/language'
 import { useToast } from '@/components/ui/toast'
 import WorkflowSteps from '@/components/WorkflowSteps'
 
@@ -19,6 +21,7 @@ export default function EditProject() {
     const projectPathFromQuery = searchParams.get('project')
 
     const [projectName, setProjectName] = useState('')
+    const [language, setLanguage] = useState<ProjectLanguage>({ code: 'en', name: 'English' })
     const [projectPath, setProjectPath] = useState<string | null>(null)
     const [steps, setSteps] = useState<Step[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -37,12 +40,14 @@ export default function EditProject() {
                 if (result.success && result.project) {
                     setProjectName(result.project.name || result.project.projectName || 'Untitled')
                     setProjectPath(projectPathFromQuery)
+                    setLanguage(await resolveConfiguredLanguage(result.project.language))
 
                     if (result.project.steps) {
                         const loadedSteps: Step[] = result.project.steps.map((s: any) => ({
                             id: s.id || uuidv4(),
                             number: s.number,
                             title: s.title,
+                            caption: s.caption || s.generated_caption || s.title || '',
                             description: s.description || '',
                             imagePath: s.imagePath,
                             captured: !!s.imagePath,
@@ -68,6 +73,7 @@ export default function EditProject() {
                 id: uuidv4(),
                 number: prev.length + 1,
                 title: '',
+                caption: '',
                 description: '',
                 imagePath: null,
                 captured: false,
@@ -88,12 +94,14 @@ export default function EditProject() {
     const handleSuggestNext = async () => {
         setIsSuggesting(true)
         try {
+            const activeLanguage = await resolveConfiguredLanguage(language)
+            setLanguage(activeLanguage)
             const payload = steps.map((s) => ({ number: s.number, title: s.title, description: s.description }))
-            const { title, description } = await suggestNextStep(payload, steps.length - 1)
+            const { title, description } = await suggestNextStep(payload, steps.length - 1, '', activeLanguage)
             if (title || description) {
                 setSteps((prev) => [
                     ...prev,
-                    { id: uuidv4(), number: prev.length + 1, title, description, imagePath: null, captured: false, skipped: false },
+                    { id: uuidv4(), number: prev.length + 1, title, caption: title, description, imagePath: null, captured: false, skipped: false },
                 ])
                 toast({ variant: 'success', title: 'Step suggested', description: title || 'Added a new step.' })
             } else {
@@ -132,10 +140,12 @@ export default function EditProject() {
                 name: projectName,
                 projectName: projectName,
                 updatedAt: new Date().toISOString(),
+                language,
                 steps: steps.map(s => ({
                     id: s.id,
                     number: s.number,
                     title: s.title,
+                    caption: s.caption || '',
                     description: s.description,
                     imagePath: s.imagePath,
                     captured: !!s.imagePath,
@@ -149,7 +159,8 @@ export default function EditProject() {
             state: {
                 projectName,
                 steps,
-                projectPath
+                projectPath,
+                language
             }
         })
     }
@@ -292,13 +303,22 @@ function StepCard({
                                 className="bg-background/50"
                             />
                         </div>
-                        <div className="space-y-2 !mb-5">
-                            <Label>Description / Caption</Label>
+                        <div className="space-y-2">
+                            <Label>Caption</Label>
                             <Input
+                                value={step.caption || ''}
+                                onChange={(e) => onStepChange(step.id, 'caption', e.target.value)}
+                                placeholder="e.g. Terminal output after successful installation"
+                                className="bg-background/50"
+                            />
+                        </div>
+                        <div className="space-y-2 !mb-5">
+                            <Label>Description</Label>
+                            <Textarea
                                 value={step.description}
                                 onChange={(e) => onStepChange(step.id, 'description', e.target.value)}
-                                placeholder="e.g. Launch the terminal application from the dock."
-                                className="bg-background/50"
+                                placeholder="e.g. Explain what should be visible: command, output, file, validation result, or UI state."
+                                className="min-h-28 resize-y bg-background/50 leading-relaxed"
                             />
                         </div>
                     </div>

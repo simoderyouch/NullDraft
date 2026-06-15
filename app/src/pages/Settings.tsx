@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
-import { ArrowLeft, Save, RotateCcw, Key, Keyboard, Palette, FolderOpen, FileOutput, Camera, ShieldCheck, Loader2 } from 'lucide-react'
+import { ArrowLeft, Save, RotateCcw, Key, Keyboard, Palette, FolderOpen, FileOutput, Camera, ShieldCheck, Loader2, Languages } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
+import { LANGUAGE_OPTIONS, languageNameForCode } from '@/lib/language'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -23,6 +24,8 @@ export default function Settings() {
   const [exportTemplate, setExportTemplate] = useState('default')
   const [screenshotFormat, setScreenshotFormat] = useState('png')
   const [screenshotQuality, setScreenshotQuality] = useState(90)
+  const [languageMode, setLanguageMode] = useState<'auto' | 'manual'>('auto')
+  const [languageCode, setLanguageCode] = useState('en')
   const [localOnly, setLocalOnly] = useState(false)
   const [encryptProjects, setEncryptProjects] = useState(false)
   const [encryptionPassphrase, setEncryptionPassphrase] = useState('')
@@ -46,6 +49,8 @@ export default function Settings() {
         setExportTemplate(config.exportTemplate || 'default')
         setScreenshotFormat(config.screenshotFormat || 'png')
         setScreenshotQuality(config.screenshotQuality ?? 90)
+        setLanguageMode(config.languageMode || 'auto')
+        setLanguageCode(config.languageCode || 'en')
         setLocalOnly(config.localOnly || false)
         setEncryptProjects(config.encryptProjects || false)
         setEncryptionPassphrase(config.encryptionPassphrase || '')
@@ -75,6 +80,7 @@ export default function Settings() {
         apiKey, provider, captureHotkey, skipHotkey, backHotkey, darkMode,
         defaultProjectLocation, exportFormat, exportTemplate,
         screenshotFormat, screenshotQuality, localOnly,
+        languageMode, languageCode, languageName: languageNameForCode(languageCode),
         encryptProjects, encryptionPassphrase,
       }
       await window.electronAPI.saveConfig(config as any)
@@ -99,6 +105,8 @@ export default function Settings() {
     setExportTemplate('default')
     setScreenshotFormat('png')
     setScreenshotQuality(90)
+    setLanguageMode('auto')
+    setLanguageCode('en')
     setLocalOnly(false)
     setEncryptProjects(false)
     setEncryptionPassphrase('')
@@ -216,7 +224,7 @@ export default function Settings() {
                   Export Defaults
                 </CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-4">
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="ef">Default format</Label>
                   <select id="ef" value={exportFormat} onChange={(e) => setExportFormat(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
@@ -241,6 +249,47 @@ export default function Settings() {
               </CardContent>
             </Card>
 
+            {/* Language */}
+            <Card className="glass mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Languages className="h-5 w-5" />
+                  Language
+                </CardTitle>
+                <CardDescription>
+                  Control the language used for steps, captions, explanations, narrative, and reports
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="languageMode">Mode</Label>
+                  <select
+                    id="languageMode"
+                    value={languageMode}
+                    onChange={(e) => setLanguageMode(e.target.value as 'auto' | 'manual')}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="auto">Auto-detect from document</option>
+                    <option value="manual">Use selected language</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="languageCode">Language</Label>
+                  <select
+                    id="languageCode"
+                    value={languageCode}
+                    onChange={(e) => setLanguageCode(e.target.value)}
+                    disabled={languageMode === 'auto'}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                  >
+                    {LANGUAGE_OPTIONS.map((language) => (
+                      <option key={language.code} value={language.code}>{language.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Screenshot quality */}
             <Card className="glass mb-6">
               <CardHeader>
@@ -250,7 +299,7 @@ export default function Settings() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="sf">Format</Label>
                     <select id="sf" value={screenshotFormat} onChange={(e) => setScreenshotFormat(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">

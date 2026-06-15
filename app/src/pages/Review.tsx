@@ -5,8 +5,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowLeft, ArrowRight, Loader2, Check, Image, X, Sparkles, RefreshCw, Pencil, ScanText, Crop, Lock } from 'lucide-react'
-import { Step } from '@/lib/projectTypes'
+import { ProjectLanguage, Step } from '@/lib/projectTypes'
 import { generateScreenshotDescription, ocrImage, smartCrop, isLocalOnly, LocalOnlyError } from '@/lib/api'
+import { resolveConfiguredLanguage } from '@/lib/language'
 import { useToast } from '@/components/ui/toast'
 import WorkflowSteps from '@/components/WorkflowSteps'
 
@@ -19,6 +20,9 @@ export default function Review() {
 
   const [steps, setSteps] = useState<Step[]>(() => location.state?.steps || [])
   const [projectName, setProjectName] = useState(() => location.state?.projectName || 'Demo Project')
+  const [language, setLanguage] = useState<ProjectLanguage>(() =>
+    location.state?.language || { code: 'en', name: 'English' }
+  )
   const [loadedProjectPath, setLoadedProjectPath] = useState<string | null>(
     () => projectPathFromQuery || location.state?.projectPath || null
   )
@@ -42,11 +46,13 @@ export default function Review() {
         if (result.success && result.project) {
           setProjectName(result.project.name || result.project.projectName || 'Untitled Project')
           setLoadedProjectPath(projectPathFromQuery)
+          setLanguage(await resolveConfiguredLanguage(result.project.language))
           if (result.project.steps) {
             setSteps(result.project.steps.map((s: any) => ({
               id: s.id || crypto.randomUUID(),
               number: s.number,
               title: s.title,
+              caption: s.caption || s.generated_caption || s.title || '',
               description: s.description || '',
               imagePath: s.imagePath,
               captured: !!s.imagePath,
@@ -77,8 +83,9 @@ export default function Review() {
         name: projectName,
         projectName,
         updatedAt: new Date().toISOString(),
+        language,
         steps: updated.map((s) => ({
-          id: s.id, number: s.number, title: s.title, description: s.description,
+          id: s.id, number: s.number, title: s.title, caption: s.caption || '', description: s.description,
           imagePath: s.imagePath, captured: !!s.imagePath, skipped: s.skipped,
           notes: s.notes || '', generated_description: s.generated_description || '',
           generated_caption: s.generated_caption || '',
@@ -87,7 +94,7 @@ export default function Review() {
         })),
       },
     })
-  }, [loadedProjectPath, projectName])
+  }, [loadedProjectPath, projectName, language])
 
   const updateStep = useCallback((id: string, patch: Partial<Step>, save = true) => {
     setSteps((prev) => {
@@ -105,7 +112,9 @@ export default function Review() {
     if (!img) return
     setBusyStep(s.id)
     try {
-      const { description } = await generateScreenshotDescription(s.title, img)
+      const activeLanguage = await resolveConfiguredLanguage(language)
+      setLanguage(activeLanguage)
+      const { description } = await generateScreenshotDescription(s.title, img, activeLanguage)
       updateStep(s.id, { generated_description: description })
     } catch (e) {
       reportAiError(e, 'Failed to generate description. Is the backend running?')
@@ -200,8 +209,9 @@ export default function Review() {
       name: projectName,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      language,
       steps: steps.map((s) => ({
-        id: s.id, number: s.number, title: s.title, description: s.description,
+        id: s.id, number: s.number, title: s.title, caption: s.caption || '', description: s.description,
         imagePath: s.imagePath, captured: !!s.imagePath, skipped: s.skipped,
         notes: s.notes || '', generated_description: s.generated_description || '',
         generated_caption: s.generated_caption || '',
@@ -224,7 +234,7 @@ export default function Review() {
         projectPath: projectPathToUse,
         stepNumber: firstStep.number,
         steps: activeSteps.map((s) => ({
-          id: s.id, number: s.number, title: s.title, description: s.description,
+          id: s.id, number: s.number, title: s.title, caption: s.caption || '', description: s.description,
           imagePath: s.imagePath, skipped: s.skipped,
         })),
       })
@@ -236,7 +246,7 @@ export default function Review() {
     if (loadedProjectPath) {
       navigate(`/edit?project=${encodeURIComponent(loadedProjectPath)}`)
     } else {
-      navigate('/create', { state: { projectName, steps } })
+      navigate('/create', { state: { projectName, steps, language } })
     }
   }
 
@@ -279,7 +289,7 @@ export default function Review() {
           <Button
             onClick={() => {
               if (!hasUncapturedSteps) {
-                navigate('/export', { state: { projectPath: loadedProjectPath, projectName, steps } })
+                navigate('/export', { state: { projectPath: loadedProjectPath, projectName, steps, language } })
               } else {
                 handleStartCapture()
               }
@@ -330,6 +340,7 @@ export default function Review() {
                         <h3 className="font-semibold text-foreground truncate">
                           {step.title || <span className="text-muted-foreground italic">Untitled Step</span>}
                         </h3>
+                        {step.caption && <p className="text-xs text-primary/80 mt-1 line-clamp-1">{step.caption}</p>}
                         {step.description && <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{step.description}</p>}
                         {step.generated_description && (
                           <p className="text-xs text-blue-300/80 mt-2 flex items-start gap-1">

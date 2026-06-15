@@ -15,6 +15,8 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Optional
 
+from language import report_labels
+
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -37,12 +39,15 @@ class ReportStep:
         """Prefer the AI description, fall back to the user description."""
         return (self.generated_description or self.description or "").strip()
 
-    def caption(self, figure_number: int) -> str:
-        base = self.generated_caption or self.title or f"Step {self.number}"
-        # Avoid double "Figure N" if the AI already produced one.
-        if base.lower().startswith("figure"):
+    def caption(self, figure_number: int, labels: dict[str, str] | None = None) -> str:
+        labels = labels or report_labels("en")
+        figure = labels.get("figure", "Figure")
+        step = labels.get("step", "Step")
+        base = self.generated_caption or self.title or f"{step} {self.number}"
+        # Avoid double figure labels if the AI already produced one.
+        if base.lower().startswith(("figure", "figura")):
             return base
-        return f"Figure {figure_number} — {base}"
+        return f"{figure} {figure_number} - {base}"
 
 
 @dataclass
@@ -65,6 +70,8 @@ class ReportOptions:
     introduction: str = ""             # AI/user narrative inserted before the steps
     conclusion: str = ""               # AI/user narrative inserted after the steps
     branding: Branding = field(default_factory=Branding)
+    language_code: str = "en"
+    language_name: str = "English"
 
 
 # Template tuning: which sections to show by default.
@@ -129,6 +136,7 @@ def _image_status(image_path: Optional[str], output_dir: str) -> str:
 def generate_markdown(steps: list[ReportStep], options: ReportOptions, output_path: str) -> str:
     output_dir = os.path.dirname(os.path.abspath(output_path))
     b = options.branding
+    labels = report_labels(options.language_code)
     visible = _visible_steps(steps)
 
     lines: list[str] = []
@@ -142,55 +150,57 @@ def generate_markdown(steps: list[ReportStep], options: ReportOptions, output_pa
     if b.subtitle:
         lines.append(f"### {b.subtitle}\n")
     if b.author:
-        lines.append(f"*Author: {b.author}*\n")
+        lines.append(f"*{labels['author']}: {b.author}*\n")
     lines.append("")
 
     fig_no = 0
     # Table of contents
     if options.include_toc:
-        lines.append("## Table of Contents\n")
+        lines.append(f"## {labels['toc']}\n")
         for i, s in enumerate(visible, 1):
             anchor = f"step-{i}-" + "".join(
                 c if c.isalnum() else "-" for c in (s.title or "").lower()
             ).strip("-")
-            lines.append(f"{i}. [{s.title or f'Step {i}'}](#{anchor})")
+            step_label = f"{labels['step']} {i}"
+            lines.append(f"{i}. [{s.title or step_label}](#{anchor})")
         lines.append("")
 
     # Introduction
     if options.introduction:
-        lines.append("## Introduction\n")
+        lines.append(f"## {labels['introduction']}\n")
         lines.append(options.introduction + "\n")
 
     # Steps
     for i, s in enumerate(visible, 1):
-        lines.append(f"## Step {i}: {s.title or 'Untitled'}\n")
+        lines.append(f"## {labels['step']} {i}: {s.title or labels['untitled']}\n")
         if options.include_descriptions and s.body_text:
             lines.append(s.body_text + "\n")
         status = _image_status(s.image_path, output_dir)
         if status == "ok":
             img = _rel_image(s.image_path, output_dir)
             fig_no += 1
-            lines.append(f"![{s.caption(fig_no)}]({img})\n")
-            lines.append(f"*{s.caption(fig_no)}*\n")
+            cap = s.caption(fig_no, labels)
+            lines.append(f"![{cap}]({img})\n")
+            lines.append(f"*{cap}*\n")
         elif status == "missing":
-            lines.append(f"> ⚠️ **Screenshot missing:** `{s.image_path}`\n")
+            lines.append(f"> **{labels['screenshot_missing']}:** `{s.image_path}`\n")
         if options.include_notes and s.notes:
-            lines.append(f"> **Note:** {s.notes}\n")
+            lines.append(f"> **{labels['note']}:** {s.notes}\n")
         lines.append("")
 
     # Conclusion
     if options.conclusion:
-        lines.append("## Conclusion\n")
+        lines.append(f"## {labels['conclusion']}\n")
         lines.append(options.conclusion + "\n")
 
     # List of figures
     if options.include_lof and fig_no > 0:
-        lines.append("## List of Figures\n")
+        lines.append(f"## {labels['lof']}\n")
         fno = 0
         for s in visible:
             if s.image_path:
                 fno += 1
-                lines.append(f"- {s.caption(fno)}")
+                lines.append(f"- {s.caption(fno, labels)}")
         lines.append("")
 
     content = "\n".join(lines)
@@ -221,6 +231,7 @@ def _latex_escape(text: str) -> str:
 def generate_latex(steps: list[ReportStep], options: ReportOptions, output_path: str) -> str:
     output_dir = os.path.dirname(os.path.abspath(output_path))
     b = options.branding
+    labels = report_labels(options.language_code)
     visible = _visible_steps(steps)
 
     docclass = "article"
@@ -260,14 +271,14 @@ def generate_latex(steps: list[ReportStep], options: ReportOptions, output_path:
     parts.append("\\newpage")
 
     if options.introduction:
-        parts.append("\\section*{Introduction}")
-        parts.append("\\addcontentsline{toc}{section}{Introduction}")
+        parts.append(f"\\section*{{{_latex_escape(labels['introduction'])}}}")
+        parts.append(f"\\addcontentsline{{toc}}{{section}}{{{_latex_escape(labels['introduction'])}}}")
         parts.append(_latex_escape(options.introduction))
         parts.append("")
 
     fig_no = 0
     for i, s in enumerate(visible, 1):
-        parts.append(f"\\section{{{_latex_escape(s.title or 'Untitled')}}}")
+        parts.append(f"\\section{{{_latex_escape(s.title or labels['untitled'])}}}")
         if options.include_descriptions and s.body_text:
             parts.append(_latex_escape(s.body_text))
             parts.append("")
@@ -275,7 +286,7 @@ def generate_latex(steps: list[ReportStep], options: ReportOptions, output_path:
         if status == "ok":
             img = _rel_image(s.image_path, output_dir)
             fig_no += 1
-            cap = s.caption(fig_no)
+            cap = s.caption(fig_no, labels)
             parts.append("\\begin{figure}[H]")
             parts.append("\\centering")
             parts.append(f"\\includegraphics[width=0.85\\textwidth]{{{img}}}")
@@ -283,15 +294,15 @@ def generate_latex(steps: list[ReportStep], options: ReportOptions, output_path:
             parts.append(f"\\label{{fig:step{i}}}")
             parts.append("\\end{figure}")
         elif status == "missing":
-            parts.append(f"\\textit{{[Screenshot missing: {_latex_escape(s.image_path or '')}]}}")
+            parts.append(f"\\textit{{[{_latex_escape(labels['screenshot_missing'])}: {_latex_escape(s.image_path or '')}]}}")
             parts.append("")
         if options.include_notes and s.notes:
-            parts.append(f"\\textit{{Note: {_latex_escape(s.notes)}}}")
+            parts.append(f"\\textit{{{_latex_escape(labels['note'])}: {_latex_escape(s.notes)}}}")
             parts.append("")
 
     if options.conclusion:
-        parts.append("\\section*{Conclusion}")
-        parts.append("\\addcontentsline{toc}{section}{Conclusion}")
+        parts.append(f"\\section*{{{_latex_escape(labels['conclusion'])}}}")
+        parts.append(f"\\addcontentsline{{toc}}{{section}}{{{_latex_escape(labels['conclusion'])}}}")
         parts.append(_latex_escape(options.conclusion))
         parts.append("")
 
@@ -312,6 +323,7 @@ def generate_docx(steps: list[ReportStep], options: ReportOptions, output_path: 
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     b = options.branding
+    labels = report_labels(options.language_code)
     visible = _visible_steps(steps)
     doc = Document()
 
@@ -328,23 +340,24 @@ def generate_docx(steps: list[ReportStep], options: ReportOptions, output_path: 
         sub = doc.add_paragraph(b.subtitle)
         sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
     if b.author:
-        auth = doc.add_paragraph(f"Author: {b.author}")
+        auth = doc.add_paragraph(f"{labels['author']}: {b.author}")
         auth.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     # Manual Table of Contents (deterministic; survives PDF conversion)
     if options.include_toc:
-        doc.add_heading("Table of Contents", level=1)
+        doc.add_heading(labels['toc'], level=1)
         for i, s in enumerate(visible, 1):
-            doc.add_paragraph(f"{i}. {s.title or f'Step {i}'}", style="List Number" if False else None)
+            step_label = f"{labels['step']} {i}"
+            doc.add_paragraph(f"{i}. {s.title or step_label}", style="List Number" if False else None)
 
     if options.introduction:
-        doc.add_heading("Introduction", level=1)
+        doc.add_heading(labels['introduction'], level=1)
         doc.add_paragraph(options.introduction)
 
     fig_no = 0
     figure_captions: list[str] = []
     for i, s in enumerate(visible, 1):
-        doc.add_heading(f"Step {i}: {s.title or 'Untitled'}", level=1)
+        doc.add_heading(f"{labels['step']} {i}: {s.title or labels['untitled']}", level=1)
         if options.include_descriptions and s.body_text:
             doc.add_paragraph(s.body_text)
         status = _image_status(s.image_path, os.path.dirname(os.path.abspath(output_path)))
@@ -355,8 +368,8 @@ def generate_docx(steps: list[ReportStep], options: ReportOptions, output_path: 
                 doc.add_picture(resolved, width=Inches(6))
                 doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
             except Exception:
-                doc.add_paragraph(f"[Could not embed image: {s.image_path}]")
-            cap = s.caption(fig_no)
+                doc.add_paragraph(f"[{labels['could_not_embed']}: {s.image_path}]")
+            cap = s.caption(fig_no, labels)
             figure_captions.append(cap)
             caption_p = doc.add_paragraph()
             run = caption_p.add_run(cap)
@@ -365,22 +378,22 @@ def generate_docx(steps: list[ReportStep], options: ReportOptions, output_path: 
             caption_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         elif status == "missing":
             warn_p = doc.add_paragraph()
-            warn_run = warn_p.add_run(f"[Screenshot missing: {s.image_path}]")
+            warn_run = warn_p.add_run(f"[{labels['screenshot_missing']}: {s.image_path}]")
             warn_run.italic = True
             warn_run.font.size = Pt(10)
             warn_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         if options.include_notes and s.notes:
             note_p = doc.add_paragraph()
-            note_run = note_p.add_run(f"Note: {s.notes}")
+            note_run = note_p.add_run(f"{labels['note']}: {s.notes}")
             note_run.italic = True
 
     if options.conclusion:
-        doc.add_heading("Conclusion", level=1)
+        doc.add_heading(labels['conclusion'], level=1)
         doc.add_paragraph(options.conclusion)
 
     if options.include_lof and figure_captions:
         doc.add_page_break()
-        doc.add_heading("List of Figures", level=1)
+        doc.add_heading(labels['lof'], level=1)
         for cap in figure_captions:
             doc.add_paragraph(cap)
 
@@ -441,12 +454,14 @@ def generate_json(steps: list[ReportStep], options: ReportOptions, output_path: 
         "title": options.branding.title,
         "author": options.branding.author,
         "template": options.template,
+        "language": {"code": options.language_code, "name": options.language_name},
         "introduction": options.introduction,
         "conclusion": options.conclusion,
         "steps": [
             {
                 "number": s.number,
                 "title": s.title,
+                "caption": s.generated_caption,
                 "description": s.description,
                 "generated_description": s.generated_description,
                 "generated_caption": s.generated_caption,

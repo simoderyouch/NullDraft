@@ -23,6 +23,7 @@ import ai
 import images
 import report_gen
 import doc_enhance
+from language import detect_language, language_info_for_code
 from report_gen import Branding, ReportOptions, ReportStep
 
 load_dotenv()
@@ -46,6 +47,7 @@ class StepModel(BaseModel):
     id: Optional[str] = None
     number: int = 0
     title: str = ""
+    caption: str = ""
     description: str = ""
     generated_description: str = ""
     generated_caption: str = ""
@@ -53,6 +55,11 @@ class StepModel(BaseModel):
     ocr_text: str = ""
     image_path: Optional[str] = None
     skipped: bool = False
+
+
+class LanguageModel(BaseModel):
+    code: str = "en"
+    name: str = "English"
 
 
 class BrandingModel(BaseModel):
@@ -80,21 +87,25 @@ class ReportRequest(BaseModel):
     branding: Optional[BrandingModel] = None
     # Back-compat: map of step_id -> absolute image path
     image_paths: dict = {}
+    language: LanguageModel = LanguageModel()
 
 
 class CaptionRequest(BaseModel):
     steps: List[StepModel] = []
+    language: LanguageModel = LanguageModel()
 
 
 class NarrativeRequest(BaseModel):
     title: str = "Technical Report"
     steps: List[StepModel] = []
+    language: LanguageModel = LanguageModel()
 
 
 class SuggestNextRequest(BaseModel):
     steps: List[StepModel] = []
     current_index: int = -1
     document_text: str = ""
+    language: LanguageModel = LanguageModel()
 
 
 class SmartCropRequest(BaseModel):
@@ -155,7 +166,7 @@ def _to_report_steps(steps: List[StepModel], image_paths: dict | None = None) ->
             description=s.description,
             image_path=img,
             generated_description=s.generated_description,
-            generated_caption=s.generated_caption,
+            generated_caption=s.generated_caption or s.caption,
             notes=s.notes,
             ocr_text=s.ocr_text,
             skipped=s.skipped,
@@ -181,6 +192,8 @@ def _options_from_request(req: ReportRequest) -> ReportOptions:
             header=b.header,
             watermark=b.watermark,
         ),
+        language_code=req.language.code,
+        language_name=req.language.name,
     )
 
 
@@ -206,7 +219,11 @@ def health_check():
 # ---------------------------------------------------------------------------
 
 @app.post("/analyze-instructions")
-async def analyze_instructions(file: UploadFile = File(...)):
+async def analyze_instructions(
+    file: UploadFile = File(...),
+    language_code: str = Form("auto"),
+    language_name: str = Form(""),
+):
     if not ai.is_configured():
         raise HTTPException(status_code=500, detail="AI provider not configured")
     content = await file.read()
@@ -214,20 +231,28 @@ async def analyze_instructions(file: UploadFile = File(...)):
     if not text.strip():
         raise HTTPException(status_code=400, detail="No text found in file")
     try:
-        steps = ai.analyze_instructions(text)
-        return {"steps": steps}
+        lang = language_info_for_code(language_code, language_name or None) if language_code != "auto" else detect_language(text)
+        steps = ai.analyze_instructions(text, lang.name, lang.code)
+        return {"steps": steps, "language": {"code": lang.code, "name": lang.name}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/analyze-document")
-async def analyze_document(file: UploadFile = File(...)):
+async def analyze_document(
+    file: UploadFile = File(...),
+    language_code: str = Form("auto"),
+    language_name: str = Form(""),
+):
     if not ai.is_configured():
         raise HTTPException(status_code=500, detail="AI provider not configured")
     content = await file.read()
     text = _extract_text_from_upload(file.filename or "", content)
     try:
-        return ai.analyze_document(text)
+        lang = language_info_for_code(language_code, language_name or None) if language_code != "auto" else detect_language(text)
+        result = ai.analyze_document(text, lang.name, lang.code)
+        result["language"] = {"code": lang.code, "name": lang.name}
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -275,25 +300,36 @@ async def enhance_document(
 # ---------------------------------------------------------------------------
 
 @app.post("/generate-description")
-async def generate_description(step_title: str, file: UploadFile = File(...)):
+async def generate_description(
+    step_title: str,
+    language_code: str = "en",
+    language_name: str = "English",
+    file: UploadFile = File(...),
+):
     if not ai.is_configured():
         raise HTTPException(status_code=500, detail="AI provider not configured")
     content = await file.read()
     mime = file.content_type or "image/png"
     try:
-        return {"description": ai.describe_screenshot(step_title, content, mime)}
+        return {"description": ai.describe_screenshot(step_title, content, mime, language_name, language_code)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/validate-step")
-async def validate_step(step_title: str, step_description: str = "", file: UploadFile = File(...)):
+async def validate_step(
+    step_title: str,
+    step_description: str = "",
+    language_code: str = "en",
+    language_name: str = "English",
+    file: UploadFile = File(...),
+):
     if not ai.is_configured():
         raise HTTPException(status_code=500, detail="AI provider not configured")
     content = await file.read()
     mime = file.content_type or "image/png"
     try:
-        return ai.validate_step(step_title, step_description, content, mime)
+        return ai.validate_step(step_title, step_description, content, mime, language_name, language_code)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -331,7 +367,7 @@ async def suggest_next(req: SuggestNextRequest):
         for s in req.steps
     ]
     try:
-        return ai.suggest_next_step(payload, req.current_index, req.document_text)
+        return ai.suggest_next_step(payload, req.current_index, req.document_text, req.language.name, req.language.code)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -345,7 +381,7 @@ async def suggest_branches(req: SuggestNextRequest):
         for s in req.steps
     ]
     try:
-        return {"branches": ai.suggest_branches(payload, req.current_index, req.document_text)}
+        return {"branches": ai.suggest_branches(payload, req.current_index, req.document_text, req.language.name, req.language.code)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -381,13 +417,14 @@ async def generate_captions(req: CaptionRequest):
         {
             "id": s.id,
             "title": s.title,
+            "caption": s.caption,
             "description": s.description,
             "generated_description": s.generated_description,
         }
         for s in req.steps
     ]
     try:
-        return {"captions": ai.generate_captions(payload)}
+        return {"captions": ai.generate_captions(payload, req.language.name, req.language.code)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -398,7 +435,7 @@ async def generate_narrative(req: NarrativeRequest):
         raise HTTPException(status_code=500, detail="AI provider not configured")
     payload = [{"title": s.title, "description": s.description} for s in req.steps]
     try:
-        return ai.generate_narrative(req.title, payload)
+        return ai.generate_narrative(req.title, payload, req.language.name, req.language.code)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -444,7 +481,7 @@ async def generate_report(req: ReportRequest):
     if req.include_narrative and not (req.introduction or req.conclusion) and ai.is_configured():
         try:
             payload = [{"title": s.title, "description": s.description} for s in req.steps]
-            narrative = ai.generate_narrative(req.title, payload)
+            narrative = ai.generate_narrative(req.title, payload, req.language.name, req.language.code)
             options.introduction = narrative.get("introduction", "")
             options.conclusion = narrative.get("conclusion", "")
         except Exception:

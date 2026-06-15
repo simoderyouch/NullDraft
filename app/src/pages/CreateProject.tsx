@@ -2,14 +2,16 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, UploadCloud } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { v4 as uuidv4 } from 'uuid'
-import { Step } from '@/lib/projectTypes'
+import { ProjectLanguage, Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
 import { uploadAssessmentAndGenerateSteps } from '@/lib/api'
+import { getManualLanguageOverride, resolveConfiguredLanguage } from '@/lib/language'
 import { useToast } from '@/components/ui/toast'
 
 export default function CreateProject() {
@@ -21,6 +23,10 @@ export default function CreateProject() {
     const [projectName, setProjectName] = useState(() =>
         location.state?.projectName || ''
     )
+    const [language, setLanguage] = useState<ProjectLanguage>(() =>
+        location.state?.language || { code: 'en', name: 'English' }
+    )
+
     const [steps, setSteps] = useState<Step[]>(() => {
         if (location.state?.steps && location.state.steps.length > 0) {
             return location.state.steps
@@ -29,6 +35,7 @@ export default function CreateProject() {
             id: uuidv4(),
             number: 1,
             title: '',
+            caption: '',
             description: '',
             imagePath: null,
             captured: false,
@@ -45,12 +52,16 @@ export default function CreateProject() {
             if (!projectName.trim()) {
                 setProjectName(file.name.replace(/\.[^.]+$/, ''))
             }
-            const data = await uploadAssessmentAndGenerateSteps(file)
+            const languageOverride = await getManualLanguageOverride()
+            const data = await uploadAssessmentAndGenerateSteps(file, languageOverride)
+            const projectLanguage = await resolveConfiguredLanguage(data.language)
+            setLanguage(projectLanguage)
             if (data.steps && Array.isArray(data.steps)) {
                 setSteps(data.steps.map((s: any, idx: number) => ({
                     id: uuidv4(),
                     number: idx + 1,
                     title: s.title || '',
+                    caption: s.caption || s.title || '',
                     description: s.description || '',
                     imagePath: null,
                     captured: false,
@@ -74,13 +85,18 @@ export default function CreateProject() {
 
     // Handle a file dropped on the dashboard, or a template chosen there.
     useEffect(() => {
-        if (location.state?.droppedFile instanceof File) {
+        const hasDroppedFile = location.state?.droppedFile instanceof File
+        if (!location.state?.language && !hasDroppedFile) {
+            resolveConfiguredLanguage().then(setLanguage)
+        }
+        if (hasDroppedFile) {
             processFile(location.state.droppedFile)
         } else if (location.state?.templateSteps && Array.isArray(location.state.templateSteps)) {
             setSteps(location.state.templateSteps.map((s: any, idx: number) => ({
                 id: uuidv4(),
                 number: idx + 1,
                 title: s.title || '',
+                caption: s.caption || s.title || '',
                 description: s.description || '',
                 imagePath: null,
                 captured: false,
@@ -100,6 +116,7 @@ export default function CreateProject() {
                 id: uuidv4(),
                 number: prev.length + 1,
                 title: '',
+                caption: '',
                 description: '',
                 imagePath: null,
                 captured: false,
@@ -139,7 +156,8 @@ export default function CreateProject() {
         navigate('/review', {
             state: {
                 projectName,
-                steps
+                steps,
+                language
             }
         })
     }
@@ -289,13 +307,22 @@ function StepCard({
                                 className="bg-background/50"
                             />
                         </div>
-                        <div className="space-y-2 !mb-5">
-                            <Label>Description / Caption</Label>
+                        <div className="space-y-2">
+                            <Label>Caption</Label>
                             <Input
+                                value={step.caption || ''}
+                                onChange={(e) => onStepChange(step.id, 'caption', e.target.value)}
+                                placeholder="e.g. Terminal output after successful installation"
+                                className="bg-background/50"
+                            />
+                        </div>
+                        <div className="space-y-2 !mb-5">
+                            <Label>Description</Label>
+                            <Textarea
                                 value={step.description}
                                 onChange={(e) => onStepChange(step.id, 'description', e.target.value)}
-                                placeholder="e.g. Launch the terminal application from the dock."
-                                className="bg-background/50"
+                                placeholder="e.g. Explain what should be visible: command, output, file, validation result, or UI state."
+                                className="min-h-28 resize-y bg-background/50 leading-relaxed"
                             />
                         </div>
                     </div>

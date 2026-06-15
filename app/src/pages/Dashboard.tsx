@@ -255,28 +255,6 @@ export default function Dashboard() {
           </Card>
         </motion.div>
 
-        {/* Templates Library */}
-        <div className="mt-12">
-          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
-            <LayoutTemplate className="h-6 w-6 text-primary" /> Start from a template
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {PROJECT_TEMPLATES.map((tpl) => (
-              <Card
-                key={tpl.id}
-                className="cursor-pointer card-hover"
-                onClick={() => navigate('/create', { state: { templateSteps: tpl.steps, templateName: tpl.name } })}
-              >
-                <CardHeader>
-                  <CardTitle className="text-base">{tpl.name}</CardTitle>
-                  <CardDescription>{tpl.description}</CardDescription>
-                  <p className="text-xs text-muted-foreground mt-2">{tpl.steps.length} steps</p>
-                </CardHeader>
-              </Card>
-            ))}
-          </div>
-        </div>
-
         {/* Recent Projects */}
         {!isLoading && recentProjects.length > 0 && (
           <div className="mt-12">
@@ -307,6 +285,29 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Templates Library */}
+        <div className="mt-12">
+          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
+            <LayoutTemplate className="h-6 w-6 text-primary" /> Start from a template
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {PROJECT_TEMPLATES.map((tpl) => (
+              <Card
+                key={tpl.id}
+                className="cursor-pointer card-hover"
+                onClick={() => navigate('/create', { state: { templateSteps: tpl.steps, templateName: tpl.name } })}
+              >
+                <CardHeader>
+                  <CardTitle className="text-base">{tpl.name}</CardTitle>
+                  <CardDescription>{tpl.description}</CardDescription>
+                  <p className="text-xs text-muted-foreground mt-2">{tpl.steps.length} steps</p>
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+        </div>
+
       </div>
     </div>
   )

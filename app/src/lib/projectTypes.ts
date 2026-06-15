@@ -1,9 +1,15 @@
 // Project types and interfaces
 
+export interface ProjectLanguage {
+    code: string
+    name: string
+}
+
 export interface Step {
     id: string
     number: number
     title: string
+    caption?: string
     description: string
     imagePath: string | null
     captured: boolean
@@ -23,6 +29,7 @@ export interface ProjectData {
     projectPath: string
     currentStepIndex: number
     steps: Step[]
+    language?: ProjectLanguage
 }
 
 // Helper to create a URL-safe slug from text

@@ -72,9 +72,13 @@ export async function getHealth() {
 // Instruction parsing
 // ---------------------------------------------------------------------------
 
-export async function uploadAssessmentAndGenerateSteps(file: File) {
+export async function uploadAssessmentAndGenerateSteps(file: File, language?: { code: string; name: string }) {
     const formData = new FormData()
     formData.append('file', file)
+    if (language) {
+        formData.append('language_code', language.code)
+        formData.append('language_name', language.name)
+    }
     const response = await fetch(await api('/analyze-instructions'), {
         method: 'POST',
         body: formData,
@@ -83,9 +87,13 @@ export async function uploadAssessmentAndGenerateSteps(file: File) {
     return response.json()
 }
 
-export async function analyzeDocument(file: File) {
+export async function analyzeDocument(file: File, language?: { code: string; name: string }) {
     const formData = new FormData()
     formData.append('file', file)
+    if (language) {
+        formData.append('language_code', language.code)
+        formData.append('language_name', language.name)
+    }
     const response = await fetch(await api('/analyze-document'), {
         method: 'POST',
         body: formData,
@@ -98,26 +106,28 @@ export async function analyzeDocument(file: File) {
 // Vision (operate on absolute image paths)
 // ---------------------------------------------------------------------------
 
-export async function generateScreenshotDescription(stepTitle: string, imagePath: string) {
+export async function generateScreenshotDescription(stepTitle: string, imagePath: string, language?: { code: string; name: string }) {
     await assertCloudAllowed()
     const blob = await fileToBlob(imagePath)
     const formData = new FormData()
     formData.append('file', blob, 'screenshot.png')
+    const lang = language || { code: 'en', name: 'English' }
     const response = await fetch(
-        await api(`/generate-description?step_title=${encodeURIComponent(stepTitle)}`),
+        await api(`/generate-description?step_title=${encodeURIComponent(stepTitle)}&language_code=${encodeURIComponent(lang.code)}&language_name=${encodeURIComponent(lang.name)}`),
         { method: 'POST', body: formData }
     )
     if (!response.ok) throw new Error('Failed to generate description')
     return response.json() as Promise<{ description: string }>
 }
 
-export async function validateStep(stepTitle: string, stepDescription: string, imagePath: string) {
+export async function validateStep(stepTitle: string, stepDescription: string, imagePath: string, language?: { code: string; name: string }) {
     await assertCloudAllowed()
     const blob = await fileToBlob(imagePath)
     const formData = new FormData()
     formData.append('file', blob, 'screenshot.png')
+    const lang = language || { code: 'en', name: 'English' }
     const url = await api(
-        `/validate-step?step_title=${encodeURIComponent(stepTitle)}&step_description=${encodeURIComponent(stepDescription)}`
+        `/validate-step?step_title=${encodeURIComponent(stepTitle)}&step_description=${encodeURIComponent(stepDescription)}&language_code=${encodeURIComponent(lang.code)}&language_name=${encodeURIComponent(lang.name)}`
     )
     const response = await fetch(url, { method: 'POST', body: formData })
     if (!response.ok) throw new Error('Failed to validate step')
@@ -162,11 +172,11 @@ export async function smartCrop(stepTitle: string, inputPath: string, opts: { ap
 }
 
 // Suggest conditional branches (success/error paths) from steps + document context.
-export async function suggestBranches(steps: any[], currentIndex = -1, documentText = '') {
+export async function suggestBranches(steps: any[], currentIndex = -1, documentText = '', language?: { code: string; name: string }) {
     const response = await fetch(await api('/suggest-branches'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps, current_index: currentIndex, document_text: documentText }),
+        body: JSON.stringify({ steps, current_index: currentIndex, document_text: documentText, language: language || { code: 'en', name: 'English' } }),
     })
     if (!response.ok) throw new Error('Failed to suggest branches')
     return response.json() as Promise<{ branches: Array<{ condition: string; title: string; description: string }> }>
@@ -174,11 +184,11 @@ export async function suggestBranches(steps: any[], currentIndex = -1, documentT
 
 // Suggest the next step from the defined manual steps + optional document context
 // (not from screenshot content).
-export async function suggestNextStep(steps: any[], currentIndex = -1, documentText = '') {
+export async function suggestNextStep(steps: any[], currentIndex = -1, documentText = '', language?: { code: string; name: string }) {
     const response = await fetch(await api('/suggest-next'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps, current_index: currentIndex, document_text: documentText }),
+        body: JSON.stringify({ steps, current_index: currentIndex, document_text: documentText, language: language || { code: 'en', name: 'English' } }),
     })
     if (!response.ok) throw new Error('Failed to suggest next step')
     return response.json() as Promise<{ title: string; description: string }>
@@ -188,21 +198,21 @@ export async function suggestNextStep(steps: any[], currentIndex = -1, documentT
 // Text generation
 // ---------------------------------------------------------------------------
 
-export async function generateCaptions(steps: any[]) {
+export async function generateCaptions(steps: any[], language?: { code: string; name: string }) {
     const response = await fetch(await api('/generate-captions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ steps }),
+        body: JSON.stringify({ steps, language: language || { code: 'en', name: 'English' } }),
     })
     if (!response.ok) throw new Error('Failed to generate captions')
     return response.json() as Promise<{ captions: Array<{ id: string; caption: string }> }>
 }
 
-export async function generateNarrative(title: string, steps: any[]) {
+export async function generateNarrative(title: string, steps: any[], language?: { code: string; name: string }) {
     const response = await fetch(await api('/generate-narrative'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, steps }),
+        body: JSON.stringify({ title, steps, language: language || { code: 'en', name: 'English' } }),
     })
     if (!response.ok) throw new Error('Failed to generate narrative')
     return response.json() as Promise<{ introduction: string; conclusion: string }>
@@ -265,6 +275,7 @@ export interface GenerateReportParams {
     introduction?: string
     conclusion?: string
     branding?: ReportBranding
+    language?: { code: string; name: string }
 }
 
 export async function generateReport(params: GenerateReportParams) {
@@ -285,6 +296,7 @@ export async function generateReport(params: GenerateReportParams) {
             introduction: params.introduction ?? '',
             conclusion: params.conclusion ?? '',
             branding: params.branding,
+            language: params.language || { code: 'en', name: 'English' },
         }),
     })
     if (!response.ok) {

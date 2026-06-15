@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ArrowLeft, Upload, Loader2, Camera, Check, Wand2, FolderOpen, File as FileIcon } from 'lucide-react'
 import { analyzeDocument, enhanceDocument } from '@/lib/api'
+import { getManualLanguageOverride } from '@/lib/language'
 
 interface Placeholder {
   location: string
@@ -45,7 +46,7 @@ export default function EnhanceDocument() {
     setIsAnalyzing(true)
     setStatus('Analyzing document for figure placeholders...')
     try {
-      const data = await analyzeDocument(f)
+      const data = await analyzeDocument(f, await getManualLanguageOverride())
       const ph: Placeholder[] = (data.placeholders || []).map((p: any) => ({
         location: p.location || '',
         suggested_title: p.suggested_title || '',

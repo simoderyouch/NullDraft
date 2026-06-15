@@ -61,6 +61,9 @@ interface AppConfig {
   exportTemplate: string
   screenshotFormat: string
   screenshotQuality: number
+  languageMode: 'auto' | 'manual'
+  languageCode: string
+  languageName: string
   localOnly: boolean
   encryptProjects: boolean
   encryptionPassphrase: string
@@ -81,6 +84,9 @@ const DEFAULT_CONFIG: AppConfig = {
   exportTemplate: 'default',
   screenshotFormat: 'png',
   screenshotQuality: 90,
+  languageMode: 'auto',
+  languageCode: 'en',
+  languageName: 'English',
   localOnly: false,
   encryptProjects: false,
   encryptionPassphrase: '',

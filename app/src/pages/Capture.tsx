@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Camera, ArrowLeft, CheckCircle2, Home } from 'lucide-react'
@@ -7,6 +7,7 @@ import { Camera, ArrowLeft, CheckCircle2, Home } from 'lucide-react'
 export default function Capture() {
   const navigate = useNavigate()
   const [projectPath, setProjectPath] = useState<string | null>(null)
+  const projectPathRef = useRef<string | null>(null)
 
   // Get project path from HUD data on mount
   useEffect(() => {
@@ -17,6 +18,7 @@ export default function Capture() {
           await window.electronAPI.showHUD()
           const data = await window.electronAPI.getHUDData()
           if (data?.projectPath) {
+            projectPathRef.current = data.projectPath
             setProjectPath(data.projectPath)
           }
         } catch (error) {
@@ -43,7 +45,23 @@ export default function Capture() {
     }
   }, [])
 
-  const handleFinish = () => {
+  const getLatestProjectPath = async () => {
+    if (projectPathRef.current || projectPath) return projectPathRef.current || projectPath
+    try {
+      const data = await window.electronAPI?.getHUDData?.()
+      if (data?.projectPath) {
+        projectPathRef.current = data.projectPath
+        setProjectPath(data.projectPath)
+        return data.projectPath
+      }
+    } catch (error) {
+      console.error('Failed to refresh HUD data:', error)
+    }
+    return null
+  }
+
+  const handleFinish = async () => {
+    const path = await getLatestProjectPath()
     // Hide HUD window
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.hideHUD()
@@ -51,22 +69,23 @@ export default function Capture() {
       window.electronAPI.clearActiveSession?.()
     }
     // Navigate to export with project path
-    if (projectPath) {
-      navigate(`/export?project=${encodeURIComponent(projectPath)}`)
+    if (path) {
+      navigate(`/export?project=${encodeURIComponent(path)}`)
     } else {
       navigate('/export')
     }
   }
 
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    const path = await getLatestProjectPath()
     // Hide HUD window
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.hideHUD()
     }
     // Navigate back to review with project path so it can reload the project
-    if (projectPath) {
-      navigate(`/review?project=${encodeURIComponent(projectPath)}`)
+    if (path) {
+      navigate(`/review?project=${encodeURIComponent(path)}`)
     } else {
       navigate('/review')
     }

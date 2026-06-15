@@ -133,6 +133,9 @@ interface AppConfig {
   exportTemplate: string
   screenshotFormat: string
   screenshotQuality: number
+  languageMode: 'auto' | 'manual'
+  languageCode: string
+  languageName: string
   localOnly: boolean
   encryptProjects: boolean
   encryptionPassphrase: string
