@@ -9,9 +9,20 @@ app/node_modules
 app/dist
 app/out
 app/dist-electron
+app/build/python-win/
+app/build/python-*-embed-amd64.zip
+app/build/.electron-builder-cache/
 
 # Build artifacts
 *.tsbuildinfo
+*.AppImage
+*.deb
+
+# Generated test output and local source material
+app/test-results/
+app/playwright-report/
+app/blob-report/
+*.pdf
 
 # Python backend
 backend/venv/
@@ -30,3 +41,11 @@ backend/.venv/
 # Markdown notes (keep only the README)
 *.md
 !README.md
+!cloud/README.md
+!docs/TERMS.md
+!docs/PRIVACY.md
+!docs/DEPLOYMENT.md
+
+# Optional cloud service local data
+cloud/venv/
+cloud/.venv/

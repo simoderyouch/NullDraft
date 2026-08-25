@@ -105,6 +105,21 @@ interface Window {
     onCaptureExitHome: (callback: () => void) => void
     removeCaptureExitHomeListener: () => void
 
+    // Cloud account
+    getCloudAccountStatus: () => Promise<{ connected: boolean; skipped?: boolean; user?: { id: string; email: string; name: string; role: string }; error?: string; lastSyncStatus?: string; lastSyncAt?: string }>
+    cloudAcceptInvitation: (data: { apiUrl: string; invitation: string }) => Promise<{ success: boolean; token?: string; user?: { id: string; email: string; name: string; role: string }; error?: string }>
+    cloudLogout: () => Promise<{ success: boolean; error?: string }>
+    cloudUpdateProfile: (data: { name: string }) => Promise<{ success: boolean; user?: { id: string; email: string; name: string; role: string }; error?: string }>
+    cloudCreateInvitation: (data: { email: string; name?: string }) => Promise<{ success: boolean; activation_url?: string; invitation?: CloudInvitation; error?: string }>
+    cloudListInvitations: () => Promise<{ success: boolean; invitations: CloudInvitation[]; error?: string }>
+    cloudOpenAdminConsole: () => Promise<{ success: boolean; error?: string }>
+    cloudRevokeInvitation: (invitationId: string) => Promise<{ success: boolean; invitation?: CloudInvitation; error?: string }>
+    cloudListUsers: () => Promise<{ success: boolean; users: CloudUser[]; error?: string }>
+    cloudRevokeUserAccess: (userId: string) => Promise<{ success: boolean; user?: CloudUser; error?: string }>
+    getPendingInvitation: () => Promise<string | null>
+    onInvitationLink: (callback: (token: string) => void) => void
+    removeInvitationLinkListener: () => void
+
     // Config
     getConfig: () => Promise<AppConfig>
     saveConfig: (config: AppConfig) => Promise<boolean>
@@ -127,6 +142,7 @@ interface AppConfig {
   skipHotkey: string
   backHotkey: string
   darkMode: boolean
+  backgroundOpacity: number
   provider: string
   defaultProjectLocation: string
   exportFormat: string
@@ -136,6 +152,19 @@ interface AppConfig {
   languageMode: 'auto' | 'manual'
   languageCode: string
   languageName: string
+  cloudEnabled: boolean
+  requireCloudAccess: boolean
+  cloudApiUrl: string
+  cloudAccessToken: string
+  cloudDeviceId: string
+  cloudSyncProjects: boolean
+  cloudSyncConsentVersion: number
+  cloudUploadAssets: boolean
+  cloudUserEmail: string
+  cloudUserName: string
+  cloudUserRole: string
+  cloudLastSyncStatus: string
+  cloudLastSyncAt: string
   localOnly: boolean
   encryptProjects: boolean
   encryptionPassphrase: string
@@ -144,3 +173,22 @@ interface AppConfig {
   captureInProgress: boolean
 }
 
+interface CloudInvitation {
+  id: string
+  email: string
+  name?: string | null
+  created_at: string
+  expires_at: string
+  used_at?: string | null
+  revoked_at?: string | null
+}
+
+interface CloudUser {
+  id: string
+  email: string
+  name: string
+  role: string
+  created_at: string
+  last_seen_at?: string | null
+  access_revoked_at?: string | null
+}

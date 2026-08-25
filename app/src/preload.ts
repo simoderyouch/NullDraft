@@ -149,8 +149,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('capture-exit-home')
   },
 
+  // Cloud account
+  getCloudAccountStatus: () => ipcRenderer.invoke('cloud-account-status'),
+  cloudAcceptInvitation: (data: { apiUrl: string; invitation: string }) => ipcRenderer.invoke('cloud-accept-invitation', data),
+  cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
+  cloudUpdateProfile: (data: { name: string }) => ipcRenderer.invoke('cloud-update-profile', data),
+  cloudCreateInvitation: (data: { email: string; name?: string }) => ipcRenderer.invoke('cloud-create-invitation', data),
+  cloudListInvitations: () => ipcRenderer.invoke('cloud-list-invitations'),
+  cloudOpenAdminConsole: () => ipcRenderer.invoke('cloud-open-admin-console'),
+  cloudRevokeInvitation: (invitationId: string) => ipcRenderer.invoke('cloud-revoke-invitation', invitationId),
+  cloudListUsers: () => ipcRenderer.invoke('cloud-list-users'),
+  cloudRevokeUserAccess: (userId: string) => ipcRenderer.invoke('cloud-revoke-user-access', userId),
+  getPendingInvitation: () => ipcRenderer.invoke('get-pending-invitation'),
+  onInvitationLink: (callback: (token: string) => void) => {
+    ipcRenderer.on('invitation-link-received', (_event, token) => callback(token))
+  },
+  removeInvitationLinkListener: () => {
+    ipcRenderer.removeAllListeners('invitation-link-received')
+  },
+
   // Config
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (config: any) => ipcRenderer.invoke('save-config', config),
 })
-

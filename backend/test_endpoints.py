@@ -5,7 +5,7 @@ import json
 import httpx
 from PIL import Image, ImageDraw
 
-BASE = "http://127.0.0.1:8000"
+BASE = os.getenv("NULLDRAFT_TEST_BASE_URL", "http://127.0.0.1:8011")
 TMP = "/tmp/nulldraft-test"
 os.makedirs(TMP, exist_ok=True)
 
@@ -83,16 +83,10 @@ with httpx.Client(timeout=90) as c:
     check("validate-step", r.status_code == 200 and "pass" in r.json(),
           str(r.json()) if r.status_code == 200 else r.text)
 
-    # detect-sensitive (vision)
-    r = c.post(f"{BASE}/detect-sensitive",
-               files={"file": ("s.png", img_bytes(shot), "image/png")})
-    regions = r.json().get("regions", []) if r.status_code == 200 else []
-    check("detect-sensitive", r.status_code == 200, f"({len(regions)} regions)")
-
-    # blur-regions (apply blur if any region; else use a dummy region)
+    # blur-regions (manual region selection)
     blur_in = shot
     blur_out = os.path.join(TMP, "step-01-blurred.png")
-    use_regions = regions or [{"x": 0.2, "y": 0.38, "width": 0.4, "height": 0.08}]
+    use_regions = [{"x": 0.2, "y": 0.38, "width": 0.4, "height": 0.08}]
     r = c.post(f"{BASE}/blur-regions",
                json={"input_path": blur_in, "regions": use_regions, "output_path": blur_out})
     check("blur-regions", r.status_code == 200 and os.path.exists(blur_out))

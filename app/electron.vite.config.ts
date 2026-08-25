@@ -2,8 +2,15 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const cloudApiUrl = process.env.NULLDRAFT_CLOUD_API_URL || 'http://127.0.0.1:8010'
+const requireCloudAccess = process.env.NULLDRAFT_REQUIRE_CLOUD_ACCESS === '1'
+
 export default defineConfig({
   main: {
+    define: {
+      'process.env.NULLDRAFT_CLOUD_API_URL': JSON.stringify(cloudApiUrl),
+      'process.env.NULLDRAFT_REQUIRE_CLOUD_ACCESS': JSON.stringify(requireCloudAccess ? '1' : ''),
+    },
     plugins: [externalizeDepsPlugin()],
     build: {
       lib: {
@@ -12,6 +19,10 @@ export default defineConfig({
     },
   },
   preload: {
+    define: {
+      'process.env.NULLDRAFT_CLOUD_API_URL': JSON.stringify(cloudApiUrl),
+      'process.env.NULLDRAFT_REQUIRE_CLOUD_ACCESS': JSON.stringify(requireCloudAccess ? '1' : ''),
+    },
     plugins: [externalizeDepsPlugin()],
     build: {
       lib: {
@@ -27,6 +38,9 @@ export default defineConfig({
   },
   renderer: {
     root: path.resolve(__dirname, './src'),
+    server: {
+      host: '127.0.0.1',
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
@@ -40,4 +54,3 @@ export default defineConfig({
     },
   },
 })
-

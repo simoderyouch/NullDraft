@@ -3,9 +3,10 @@ uvicorn>=0.27
 python-multipart>=0.0.9
 python-dotenv>=1.0
 pydantic>=2.0
-PyPDF2>=3.0
+pypdf>=5.0
 python-docx>=1.1
 Pillow>=10.0
 mistralai>=1.0
-# Optional alternative provider (used when AI_PROVIDER=openai):
+# Optional provider SDK (used when AI_PROVIDER=openai). Anthropic and Gemini
+# use their official HTTP APIs directly, so no extra Python packages are needed.
 openai>=1.0

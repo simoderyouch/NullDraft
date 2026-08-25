@@ -24,6 +24,7 @@
     --input: 217 33% 20%;
     --ring: 217 91% 60%;
     --radius: 0.75rem;
+    --app-background-opacity: 0.7;
   }
 }
 
@@ -33,25 +34,35 @@
   }
 
   html,
-  body {
+  body,
+  #root {
     height: 100%;
+    background: transparent;
   }
 
   body {
-    @apply text-foreground backdrop-blur-2xl;
+    @apply text-foreground;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
       'Helvetica Neue', Arial, 'Cantarell', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    background-color: hsla(224, 47%, 8%, 0.72);
-    background-image:
-      radial-gradient(50rem 50rem at 12% -10%, hsla(217, 91%, 55%, 0.22), transparent 60%),
-      radial-gradient(45rem 45rem at 100% 0%, hsla(199, 89%, 52%, 0.18), transparent 55%),
-      radial-gradient(40rem 40rem at 50% 120%, hsla(210, 90%, 55%, 0.12), transparent 60%);
-    background-attachment: fixed;
+    background: transparent;
   }
+}
 
+.app-shell {
+  min-height: 100vh;
+  background-color: hsl(var(--background) / var(--app-background-opacity));
+  background-image:
+    radial-gradient(50rem 50rem at 12% -10%, hsla(217, 91%, 55%, 0.22), transparent 60%),
+    radial-gradient(45rem 45rem at 100% 0%, hsla(199, 89%, 52%, 0.18), transparent 55%),
+    radial-gradient(40rem 40rem at 50% 120%, hsla(210, 90%, 55%, 0.12), transparent 60%);
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+@layer base {
   h1,
   h2,
   h3,
@@ -108,20 +119,121 @@
   background: hsla(224, 47%, 8%, 0.72) !important;
 }
 
+/* Keep an open Settings dropdown above adjacent glass cards. */
+.glass:has(.settings-select[data-open="true"]) {
+  position: relative;
+  z-index: 60;
+}
+
 /* ---------------------------------------------------------------------------
    Utilities
    --------------------------------------------------------------------------- */
 
 .gradient-text {
-  background-image: linear-gradient(
-    100deg,
-    hsl(210, 40%, 98%) 0%,
-    hsl(217, 91%, 78%) 55%,
-    hsl(199, 89%, 72%) 100%
+  color: hsl(210, 40%, 98%);
+}
+
+.settings-slider {
+  --slider-progress: 50%;
+  width: 100%;
+  height: 0.6rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary)) 0%,
+    hsl(var(--accent)) var(--slider-progress),
+    hsl(var(--muted)) var(--slider-progress),
+    hsl(var(--muted)) 100%
   );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  box-shadow: inset 0 1px 3px rgba(21, 59, 122, 0.16);
+}
+
+.settings-slider::-webkit-slider-thumb {
+  width: 1.15rem;
+  height: 1.15rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 2px solid hsl(var(--card));
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 2px 10px rgba(21, 59, 122, 0.28);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.settings-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+  background: hsl(var(--accent));
+}
+
+.settings-slider:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 4px;
+}
+
+.settings-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.settings-slider::-moz-range-thumb {
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 2px solid hsl(var(--card));
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 2px 10px rgba(21, 59, 122, 0.28);
+}
+
+.annotate-slider {
+  --slider-progress: 50%;
+  width: 100%;
+  height: 0.45rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary)) 0%,
+    hsl(var(--accent)) var(--slider-progress),
+    hsl(var(--muted)) var(--slider-progress),
+    hsl(var(--muted)) 100%
+  );
+  box-shadow: inset 0 1px 3px rgba(21, 59, 122, 0.16);
+}
+
+.annotate-slider::-webkit-slider-thumb {
+  width: 1.05rem;
+  height: 1.05rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 2px solid hsl(var(--card));
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 2px 9px rgba(21, 59, 122, 0.26);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.annotate-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+  background: hsl(var(--accent));
+}
+
+.annotate-slider:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 4px;
+}
+
+.annotate-slider::-moz-range-thumb {
+  width: 1.05rem;
+  height: 1.05rem;
+  border: 2px solid hsl(var(--card));
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 2px 9px rgba(21, 59, 122, 0.26);
 }
 
 .card-hover {

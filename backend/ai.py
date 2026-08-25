@@ -1,8 +1,7 @@
 """AI provider abstraction for NullDraft.
 
-Primary provider is Mistral. OpenAI is supported as an optional alternative
-when the `openai` package is installed and an OpenAI key is configured.
-All functions degrade gracefully and raise informative errors.
+Supports Mistral, OpenAI, Anthropic Claude, and Google Gemini. Each provider
+uses its own API key and supports both text and screenshot analysis.
 """
 
 from __future__ import annotations
@@ -12,6 +11,8 @@ import json
 import os
 import re
 from typing import Optional
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 # ---------------------------------------------------------------------------
@@ -26,6 +27,17 @@ MISTRAL_TEXT_MODEL = os.getenv("MISTRAL_TEXT_MODEL", "mistral-large-latest")
 MISTRAL_VISION_MODEL = os.getenv("MISTRAL_VISION_MODEL", "pixtral-12b-2409")
 OPENAI_TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")
 OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+ANTHROPIC_TEXT_MODEL = os.getenv("ANTHROPIC_TEXT_MODEL", "claude-sonnet-4-5")
+ANTHROPIC_VISION_MODEL = os.getenv("ANTHROPIC_VISION_MODEL", ANTHROPIC_TEXT_MODEL)
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.7-flash")
+GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", GEMINI_TEXT_MODEL)
+
+PROVIDER_KEY_NAMES = {
+    "mistral": "MISTRAL_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
 
 
 class AIError(RuntimeError):
@@ -55,11 +67,49 @@ def _openai_client():
     return OpenAI(api_key=key)
 
 
+def _provider_key(provider: str) -> str:
+    key_name = PROVIDER_KEY_NAMES.get(provider)
+    if not key_name:
+        raise AIError(f"Unsupported AI provider: {provider}")
+    return os.getenv(key_name, "")
+
+
+def _post_json(url: str, payload: dict, headers: dict[str, str]) -> dict:
+    request = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=90) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:500]
+        raise AIError(f"Provider request failed ({error.code}): {detail}") from error
+    except URLError as error:
+        raise AIError(f"Could not reach AI provider: {error.reason}") from error
+
+
+def _anthropic_response_text(payload: dict) -> str:
+    return "".join(
+        str(block.get("text", ""))
+        for block in payload.get("content", [])
+        if block.get("type") == "text"
+    ).strip()
+
+
+def _gemini_response_text(payload: dict) -> str:
+    candidates = payload.get("candidates", [])
+    if not candidates:
+        raise AIError("Gemini returned no response candidates")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(str(part.get("text", "")) for part in parts if "text" in part).strip()
+
+
 def is_configured() -> bool:
     provider = get_provider()
-    if provider == "openai":
-        return bool(os.getenv("OPENAI_API_KEY"))
-    return bool(os.getenv("MISTRAL_API_KEY"))
+    return bool(_provider_key(provider))
 
 
 # ---------------------------------------------------------------------------
@@ -71,13 +121,15 @@ def _data_uri(image_bytes: bytes, mime: str = "image/png") -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def chat_text(prompt: str, json_mode: bool = False) -> str:
+def chat_text(prompt: str, json_mode: bool = False, max_tokens: Optional[int] = None) -> str:
     provider = get_provider()
     if provider == "openai":
         client = _openai_client()
         kwargs = {}
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         resp = client.chat.completions.create(
             model=OPENAI_TEXT_MODEL,
             messages=[{"role": "user", "content": prompt}],
@@ -85,10 +137,39 @@ def chat_text(prompt: str, json_mode: bool = False) -> str:
         )
         return resp.choices[0].message.content or ""
 
+    if provider == "anthropic":
+        key = _provider_key(provider)
+        payload = _post_json(
+            "https://api.anthropic.com/v1/messages",
+            {
+                "model": ANTHROPIC_TEXT_MODEL,
+                "max_tokens": max_tokens or 4096,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            {"x-api-key": key, "anthropic-version": "2023-06-01"},
+        )
+        return _anthropic_response_text(payload)
+
+    if provider == "gemini":
+        key = _provider_key(provider)
+        generation_config = {"maxOutputTokens": max_tokens} if max_tokens else {}
+        if json_mode:
+            generation_config["responseMimeType"] = "application/json"
+        payload = _post_json(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent",
+            {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": generation_config},
+            {"x-goog-api-key": key},
+        )
+        return _gemini_response_text(payload)
+
+    if provider != "mistral":
+        raise AIError(f"Unsupported AI provider: {provider}")
     client = _mistral_client()
     kwargs = {}
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
     resp = client.chat.complete(
         model=MISTRAL_TEXT_MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -115,6 +196,39 @@ def chat_vision(prompt: str, image_bytes: bytes, mime: str = "image/png") -> str
         )
         return resp.choices[0].message.content or ""
 
+    if provider == "anthropic":
+        key = _provider_key(provider)
+        payload = _post_json(
+            "https://api.anthropic.com/v1/messages",
+            {
+                "model": ANTHROPIC_VISION_MODEL,
+                "max_tokens": 2048,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(image_bytes).decode("utf-8")}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
+            },
+            {"x-api-key": key, "anthropic-version": "2023-06-01"},
+        )
+        return _anthropic_response_text(payload)
+
+    if provider == "gemini":
+        key = _provider_key(provider)
+        payload = _post_json(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_VISION_MODEL}:generateContent",
+            {"contents": [{"role": "user", "parts": [
+                {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode("utf-8")}},
+                {"text": prompt},
+            ]}]},
+            {"x-goog-api-key": key},
+        )
+        return _gemini_response_text(payload)
+
+    if provider != "mistral":
+        raise AIError(f"Unsupported AI provider: {provider}")
     client = _mistral_client()
     resp = client.chat.complete(
         model=MISTRAL_VISION_MODEL,
@@ -175,19 +289,8 @@ def _language_instruction(language_name: str = "", language_code: str = "") -> s
 
 
 def _clean_step_description(value: str) -> str:
-    text = str(value or "").strip()
-    patterns = [
-        r"\bCapturez\s+l[’']ecran\s+de\s*:?\s*",
-        r"\bCapturez\s+l[’']écran\s+de\s*:?\s*",
-        r"\bCapturez\s+une\s+capture\s+d[’']ecran\s+de\s*:?\s*",
-        r"\bCapturez\s+une\s+capture\s+d[’']écran\s+de\s*:?\s*",
-        r"\bTake\s+a\s+screenshot\s+of\s*:?\s*",
-        r"\bCapture\s+the\s+screen\s+of\s*:?\s*",
-        r"\bScreenshot\s+of\s*:?\s*",
-    ]
-    for pattern in patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
-    return text.strip(" .:-\n\t")
+    """Keep the model's action and capture guidance while normalizing whitespace."""
+    return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
 def _normalize_generated_steps(steps: list[dict]) -> list[dict]:
@@ -207,61 +310,142 @@ def _normalize_generated_steps(steps: list[dict]) -> list[dict]:
     return normalized
 
 
-def analyze_instructions(text: str, language_name: str = "", language_code: str = "") -> list[dict]:
-    prompt = f"""You are a screenshot-capture planner for technical TP/lab reports.
-Convert the source document into a precise sequence of screenshot targets. Each
-step must describe the exact screen state or visual evidence the user needs to
-produce and document, not a correction/solution narrative.
-
-{_language_instruction(language_name, language_code)}
-
-Generation rules:
-- Preserve the order and intent of the source document.
-- Treat each generated step as one screenshot to capture, or one closely related
-  group of evidence that can reasonably fit in a single screenshot.
-- If a TP question requires several visible states, split it into several capture
-  steps. If several actions lead to the same final screen, keep them as one step.
-- Focus the title on the visible result to capture, such as a terminal output,
-  configuration screen, successful command result, file contents, dashboard,
-  form, diagram, error message, or validation page.
-- The description must tell the user what to prepare on screen and what must be
-  visible. Do not tell the user to capture/take a screenshot inside the
-  description; the app already handles capture.
-- Include concrete details from the source: commands to run, files to open,
-  parameters, configuration values, expected output, page/section names, and
-  validation checks that should be visible.
-- Do not write a full correction or explain theory unless that text must appear
-  on screen. Do not say "answer the question"; say what screenshot evidence is
-  required for that question.
-- Do not invent tools, commands, outputs, credentials, or values that are not in
-  the document. If the document does not specify an exact value, phrase the step
-  as a visible verification target.
-- Avoid vague steps like "show the result". Be specific about the screen,
-  window, terminal, file, app page, or UI element that must be visible.
-- Never use phrases such as "Capturez l'écran de", "Capturez l'ecran de",
-  "Take a screenshot of", or equivalent screenshot-command wording in the
-  description.
-
-Return a JSON object with a "steps" array. Each item must have:
-- "id": a stable unique string identifier such as "step-1"
-- "title": a short internal step title, in the requested language
-- "caption": a short report-ready figure caption, in the requested language.
-  It must be concise and must not include a "Figure N" prefix.
-- "description": a detailed preparation/verification instruction in the
-  requested language. Use 2-4 clear sentences when needed. It must describe what
-  should be visible, but it must not include screenshot-command wording.
-
-Source document:
-{text}
-
-Return ONLY valid JSON."""
-    raw = chat_text(prompt, json_mode=True)
+def _steps_from_model_response(raw: str) -> list[dict]:
     data = _extract_json(raw)
     if isinstance(data, dict):
         return _normalize_generated_steps(data.get("steps", []))
     if isinstance(data, list):
         return _normalize_generated_steps(data)
     return []
+
+
+def _fallback_numbered_steps(text: str, language_code: str = "") -> list[dict]:
+    """Create useful steps from numbered assignment instructions if the AI fails.
+
+    Many TP PDFs already contain an ordered list of commands. Returning those
+    instructions is far more useful than returning an empty workflow.
+    """
+    matches = list(re.finditer(r"(?m)^\s*\d{1,2}\s*[.)]\s+(?=\S)", text or ""))
+    if not matches:
+        return []
+
+    is_french = language_code.lower().startswith("fr")
+    capture_sentence = (
+        "Exécutez cette consigne, puis prenez une capture d’écran montrant la commande, "
+        "la configuration ou le résultat demandé."
+        if is_french
+        else "Complete this task, then take a screenshot showing the command, configuration, or requested result."
+    )
+
+    steps: list[dict] = []
+    for index, match in enumerate(matches, 1):
+        end = matches[index].start() if index < len(matches) else len(text)
+        raw_instruction = text[match.end():end]
+        cleaned_lines: list[str] = []
+        for line in raw_instruction.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if re.match(r"^(Ressources\s*:|https?://)", line, flags=re.IGNORECASE):
+                break
+            if re.match(
+                r"^(UH2C/ENSET|Travaux pratiques|Pr\.\s|GLSID|II\s+(?:BDCC|CCN)|PARTIE\s+\d|\d+$)",
+                line,
+                flags=re.IGNORECASE,
+            ):
+                continue
+            cleaned_lines.append(line)
+        instruction = re.sub(r"\s+", " ", " ".join(cleaned_lines)).strip(" -:\n\t")
+        if len(instruction) < 12:
+            continue
+
+        # A concise title keeps the editor and HUD readable while the full
+        # instruction, including any command, remains in the description.
+        title = re.split(r"(?<=[.!?])\s+", instruction, maxsplit=1)[0].strip()
+        if len(title) > 100:
+            title = f"{title[:97].rstrip()}…"
+
+        steps.append({
+            "id": f"step-{len(steps) + 1}",
+            "title": title or f"Step {len(steps) + 1}",
+            "caption": title or f"Step {len(steps) + 1}",
+            "description": f"{instruction} {capture_sentence}",
+        })
+
+    return steps
+
+
+def analyze_instructions(text: str, language_name: str = "", language_code: str = "") -> list[dict]:
+    numbered_steps = _fallback_numbered_steps(text, language_code)
+    if len(numbered_steps) >= 2:
+        return numbered_steps
+
+    prompt = f"""You are a practical task planner for technical TP/lab reports.
+Convert the source document into an ordered, executable workflow. Each step must
+tell the user what they need to actually do, then state the exact proof of that
+work they should capture in a screenshot.
+
+{_language_instruction(language_name, language_code)}
+
+Generation rules:
+- Preserve the order and intent of the source document.
+- Each step must combine an action with its screenshot checkpoint. Do not create
+  empty steps that only say "take a screenshot" or "show the result".
+- Begin the description with the concrete action: what to open, create, edit,
+  configure, run, calculate, or verify. Include commands, file paths, UI labels,
+  parameters, and values when the source gives them.
+- End the description with a clear capture instruction stating what the screenshot
+  must prove after the action is complete. Use natural wording in the requested
+  language, for example: "Then take a screenshot showing the successful output
+  and the command that produced it."
+- Treat each generated step as one action-and-evidence pair, or one closely
+  related group that can reasonably fit in a single screenshot. Split tasks when
+  they require distinct visible states or independent evidence.
+- Focus each title on the work being done, such as "Configure the database
+  connection" or "Run the migration", rather than only the final screen.
+- Include concrete details from the source: commands to run, files to open,
+  parameters, configuration values, expected output, page/section names, and
+  validation checks that should be visible.
+- Do not invent a solution, tools, commands, outputs, credentials, or values that
+  are not in the document. If the document omits a detail, give the user an
+  action based on the stated requirement and name the visible evidence to capture.
+- Do not replace the action with theory or a generic instruction such as "answer
+  the question". Explain the concrete work required to produce the answer.
+- Avoid vague steps like "show the result". Be specific about both the action
+  and the final terminal, file, app page, dialog, diagram, or UI element that
+  must be visible in the screenshot.
+
+Return a JSON object with a "steps" array. Each item must have:
+- "id": a stable unique string identifier such as "step-1"
+- "title": a short internal step title, in the requested language
+- "caption": a short report-ready figure caption, in the requested language.
+  It must be concise and must not include a "Figure N" prefix.
+- "description": a concise action-and-capture instruction in the requested
+  language. Use 1-2 clear sentences: explain the work to perform, then
+  explicitly say what to capture as evidence.
+
+Source document:
+{text}
+
+Return ONLY valid JSON."""
+    steps = _steps_from_model_response(chat_text(prompt, json_mode=True, max_tokens=6000))
+    if steps:
+        return steps
+
+    recovery_prompt = f"""Extract a non-empty JSON workflow from the source document below.
+Return ONLY {{"steps": [...]}}. Create one concise step for every numbered task or
+distinct required action. Every description must state: (1) the action to do and
+(2) the result to capture in a screenshot. Do not add an empty screenshot-only
+step and do not invent information.
+
+{_language_instruction(language_name, language_code)}
+
+Each item must contain "id", "title", "caption", and "description".
+
+Source document:
+{text}"""
+    steps = _steps_from_model_response(chat_text(recovery_prompt, json_mode=True, max_tokens=6000))
+    return steps or _fallback_numbered_steps(text, language_code)
 
 
 def describe_screenshot(step_title: str, image_bytes: bytes, mime: str = "image/png",
@@ -336,37 +520,6 @@ Return ONLY a JSON object with:
     if isinstance(data, dict):
         return data
     return {"placeholders": [], "summary": ""}
-
-
-def detect_sensitive(image_bytes: bytes, mime: str = "image/png") -> list[dict]:
-    """Returns list of regions: {x, y, width, height, type} as fractions [0-1]."""
-    prompt = """Examine this screenshot for sensitive information such as passwords,
-API keys, tokens, email addresses, phone numbers, credit card numbers, or other
-personal data that should be blurred before sharing.
-
-Return ONLY a JSON object with a "regions" array. Each region:
-{"x": <left fraction 0-1>, "y": <top fraction 0-1>, "width": <fraction 0-1>, "height": <fraction 0-1>, "type": "password|email|key|other"}
-Use fractions of the image dimensions. If nothing sensitive is found, return an empty array."""
-    raw = chat_vision(prompt, image_bytes, mime)
-    data = _extract_json(raw)
-    regions = []
-    if isinstance(data, dict):
-        regions = data.get("regions", [])
-    elif isinstance(data, list):
-        regions = data
-    cleaned = []
-    for r in regions:
-        try:
-            cleaned.append({
-                "x": float(r.get("x", 0)),
-                "y": float(r.get("y", 0)),
-                "width": float(r.get("width", 0)),
-                "height": float(r.get("height", 0)),
-                "type": str(r.get("type", "other")),
-            })
-        except Exception:
-            continue
-    return cleaned
 
 
 def ocr_image(image_bytes: bytes, mime: str = "image/png") -> str:

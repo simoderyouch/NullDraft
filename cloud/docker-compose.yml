@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nulldraft}
+      POSTGRES_USER: ${POSTGRES_USER:-nulldraft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - nulldraft_pg:/var/lib/postgresql/data
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nulldraft}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-nulldraft}
+      NULLDRAFT_ENV: ${NULLDRAFT_ENV:-development}
+      NULLDRAFT_ADMIN_EMAILS: ${NULLDRAFT_ADMIN_EMAILS:-admin@example.com}
+      NULLDRAFT_BOOTSTRAP_SECRET: ${NULLDRAFT_BOOTSTRAP_SECRET:-change-this-to-a-long-random-secret}
+      NULLDRAFT_PUBLIC_URL: ${NULLDRAFT_PUBLIC_URL:-http://127.0.0.1:8010}
+      NULLDRAFT_CLOUD_ORIGINS: ${NULLDRAFT_CLOUD_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    ports:
+      - "8010:8010"
+
+volumes:
+  nulldraft_pg:

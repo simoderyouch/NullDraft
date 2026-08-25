@@ -6,7 +6,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Plus, Trash2, ArrowRight, ArrowLeft, GripVertical, UploadCloud } from 'lucide-react'
 import { Label } from '@/components/ui/label'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { v4 as uuidv4 } from 'uuid'
 import { ProjectLanguage, Step } from '@/lib/projectTypes'
 import { Reorder, useDragControls } from 'framer-motion'
@@ -45,8 +44,12 @@ export default function CreateProject() {
 
     const [isUploading, setIsUploading] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const isProcessingFileRef = useRef(false)
+    const processedDroppedFileRef = useRef<string | null>(null)
 
     const processFile = async (file: File) => {
+        if (isProcessingFileRef.current) return
+        isProcessingFileRef.current = true
         setIsUploading(true)
         try {
             if (!projectName.trim()) {
@@ -56,24 +59,28 @@ export default function CreateProject() {
             const data = await uploadAssessmentAndGenerateSteps(file, languageOverride)
             const projectLanguage = await resolveConfiguredLanguage(data.language)
             setLanguage(projectLanguage)
-            if (data.steps && Array.isArray(data.steps)) {
-                setSteps(data.steps.map((s: any, idx: number) => ({
-                    id: uuidv4(),
-                    number: idx + 1,
-                    title: s.title || '',
-                    caption: s.caption || s.title || '',
-                    description: s.description || '',
-                    imagePath: null,
-                    captured: false,
-                    skipped: false
-                })))
-                toast({ variant: 'success', title: 'Steps generated', description: `${data.steps.length} step(s) created from your file.` })
+            const generatedSteps = Array.isArray(data.steps) ? data.steps : []
+            if (generatedSteps.length === 0) {
+                throw new Error('The AI did not find any actionable steps in this file. Please try again or add the steps manually.')
             }
+            setSteps(generatedSteps.map((s: any, idx: number) => ({
+                id: uuidv4(),
+                number: idx + 1,
+                title: s.title || '',
+                caption: s.caption || s.title || '',
+                description: s.description || '',
+                imagePath: null,
+                captured: false,
+                skipped: false
+            })))
+            toast({ variant: 'success', title: 'Steps generated', description: `${generatedSteps.length} step(s) created from your file.` })
         } catch (error) {
             console.error('Failed to generate steps:', error)
-            toast({ variant: 'error', title: 'Could not generate steps', description: 'Is the backend running and the API key set?' })
+            const message = error instanceof Error ? error.message : String(error)
+            toast({ variant: 'error', title: 'Could not generate steps', description: message })
         } finally {
             setIsUploading(false)
+            isProcessingFileRef.current = false
         }
     }
 
@@ -81,6 +88,7 @@ export default function CreateProject() {
         const file = e.target.files?.[0]
         if (!file) return
         await processFile(file)
+        e.target.value = ''
     }
 
     // Handle a file dropped on the dashboard, or a template chosen there.
@@ -90,7 +98,14 @@ export default function CreateProject() {
             resolveConfiguredLanguage().then(setLanguage)
         }
         if (hasDroppedFile) {
-            processFile(location.state.droppedFile)
+            const file = location.state.droppedFile as File
+            const droppedFileKey = `${file.name}:${file.size}:${file.lastModified}`
+            if (processedDroppedFileRef.current !== droppedFileKey) {
+                processedDroppedFileRef.current = droppedFileKey
+                void processFile(file)
+                const { droppedFile: _droppedFile, ...remainingState } = location.state || {}
+                navigate(location.pathname, { replace: true, state: remainingState })
+            }
         } else if (location.state?.templateSteps && Array.isArray(location.state.templateSteps)) {
             setSteps(location.state.templateSteps.map((s: any, idx: number) => ({
                 id: uuidv4(),
@@ -163,7 +178,7 @@ export default function CreateProject() {
     }
 
     return (
-        <div className="min-h-screen p-8">
+        <div className="min-h-screen p-8 pb-24">
             <div className="max-w-4xl mx-auto space-y-8">
                 {/* Header */}
                 <div className="flex items-center z-99 justify-between">
@@ -173,7 +188,7 @@ export default function CreateProject() {
                     </Button>
                     <h1 className="text-3xl font-bold gradient-text">New Project</h1>
 
-                    <div className="flex justify-end pt-4 border-t border-white/10">
+                    <div className="flex justify-end pt-4 border-t border-border dark:border-white/10">
                         <Button
                             size="lg"
                             onClick={handleContinue}
@@ -187,7 +202,7 @@ export default function CreateProject() {
 
                 </div>
 
-                <Card className=" border-white/10">
+                <Card className="border-border dark:border-white/10">
                     <CardHeader>
                         <CardTitle>Project Details</CardTitle>
                         <CardDescription>Name your project and define the steps.</CardDescription>
@@ -236,19 +251,17 @@ export default function CreateProject() {
                         </Button>
                     </div>
 
-                    <ScrollArea className="h-[calc(100vh-400px)] pr-4">
-                        <Reorder.Group axis="y" values={steps} onReorder={handleReorder} className="space-y-4 pb-8">
-                            {steps.map((step) => (
-                                <StepCard
-                                    key={step.id}
-                                    step={step}
-                                    stepsLength={steps.length}
-                                    onStepChange={handleStepChange}
-                                    onRemoveStep={handleRemoveStep}
-                                />
-                            ))}
-                        </Reorder.Group>
-                    </ScrollArea>
+                    <Reorder.Group axis="y" values={steps} onReorder={handleReorder} className="relative space-y-4 pb-8 before:absolute before:bottom-8 before:left-5 before:top-6 before:w-px before:bg-border">
+                        {steps.map((step) => (
+                            <StepCard
+                                key={step.id}
+                                step={step}
+                                stepsLength={steps.length}
+                                onStepChange={handleStepChange}
+                                onRemoveStep={handleRemoveStep}
+                            />
+                        ))}
+                    </Reorder.Group>
                 </div>
             </div>
         </div>
@@ -259,7 +272,7 @@ function StepCard({
     step,
     stepsLength,
     onStepChange,
-    onRemoveStep
+    onRemoveStep,
 }: {
     step: Step
     stepsLength: number
@@ -274,26 +287,24 @@ function StepCard({
             id={step.id}
             dragListener={false}
             dragControls={dragControls}
-            className="relative"
+            className="relative pl-12"
             whileDrag={{
                 scale: 1.02,
                 zIndex: 50,
                 boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)"
             }}
         >
+            <div className="absolute left-0 top-5 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-primary/40 bg-background text-sm font-bold text-primary shadow-sm">
+                {step.number}
+            </div>
             <Card className="border-muted/50">
                 <CardContent className="p-4 flex gap-4 items-start pt-6">
                     {/* Drag Handle */}
                     <div
-                        className="flex-shrink-0 w-8 h-8 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none hover:bg-white/5 rounded transition-colors"
+                        className="flex-shrink-0 w-8 h-8 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none rounded transition-colors hover:bg-primary/5 dark:hover:bg-white/5"
                         onPointerDown={(e) => dragControls.start(e)}
                     >
                         <GripVertical className="h-5 w-5 text-muted-foreground/50 hover:text-muted-foreground transition-colors" />
-                    </div>
-
-                    {/* Step Number */}
-                    <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-primary/20 text-primary font-bold">
-                        {step.number}
                     </div>
 
                     {/* Form Fields */}

@@ -8,6 +8,7 @@ export default function Capture() {
   const navigate = useNavigate()
   const [projectPath, setProjectPath] = useState<string | null>(null)
   const projectPathRef = useRef<string | null>(null)
+  const handleFinishRef = useRef<() => void>(() => {})
 
   // Get project path from HUD data on mount
   useEffect(() => {
@@ -28,10 +29,10 @@ export default function Capture() {
     }
     getHUDData()
 
-    // Listen for capture completion
-    if (typeof window !== 'undefined' && window.electronAPI) {
+      // Listen for capture completion
+      if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.onCaptureCompleted(() => {
-        handleFinish()
+        handleFinishRef.current()
       })
       // Listen for exit-to-home triggered from the HUD overlay.
       window.electronAPI.onCaptureExitHome?.(() => {
@@ -43,7 +44,7 @@ export default function Capture() {
         window.electronAPI.removeCaptureExitHomeListener?.()
       }
     }
-  }, [])
+  }, [navigate])
 
   const getLatestProjectPath = async () => {
     if (projectPathRef.current || projectPath) return projectPathRef.current || projectPath
@@ -75,6 +76,7 @@ export default function Capture() {
       navigate('/export')
     }
   }
+  handleFinishRef.current = handleFinish
 
 
   const handleCancel = async () => {
@@ -188,5 +190,4 @@ export default function Capture() {
     </div>
   )
 }
-
 

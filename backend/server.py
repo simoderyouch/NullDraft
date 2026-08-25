@@ -17,7 +17,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import PyPDF2
+import pypdf
 
 import ai
 import images
@@ -137,7 +137,7 @@ def _extract_text_from_upload(filename: str, content: bytes) -> str:
     name = (filename or "").lower()
     if name.endswith(".pdf"):
         try:
-            reader = PyPDF2.PdfReader(io.BytesIO(content))
+            reader = pypdf.PdfReader(io.BytesIO(content))
             return "\n".join((p.extract_text() or "") for p in reader.pages)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {e}")
@@ -209,6 +209,8 @@ def health_check():
         "ai_configured": ai.is_configured(),
         "mistral_configured": bool(os.getenv("MISTRAL_API_KEY")),
         "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "anthropic_configured": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEY")),
         "pdf_engine": bool(report_gen._find_soffice()),
         "formats": ["md", "tex", "docx", "pdf", "json"],
     }
@@ -233,7 +235,14 @@ async def analyze_instructions(
     try:
         lang = language_info_for_code(language_code, language_name or None) if language_code != "auto" else detect_language(text)
         steps = ai.analyze_instructions(text, lang.name, lang.code)
+        if not steps:
+            raise HTTPException(
+                status_code=422,
+                detail="The AI could not extract actionable steps from this document. Please try again or add steps manually.",
+            )
         return {"steps": steps, "language": {"code": lang.code, "name": lang.name}}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -330,18 +339,6 @@ async def validate_step(
     mime = file.content_type or "image/png"
     try:
         return ai.validate_step(step_title, step_description, content, mime, language_name, language_code)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/detect-sensitive")
-async def detect_sensitive(file: UploadFile = File(...)):
-    if not ai.is_configured():
-        raise HTTPException(status_code=500, detail="AI provider not configured")
-    content = await file.read()
-    mime = file.content_type or "image/png"
-    try:
-        return {"regions": ai.detect_sensitive(content, mime)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -545,5 +542,5 @@ async def generate_latex_report(payload: dict = Body(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("NULLDRAFT_PORT", "8000"))
+    port = int(os.getenv("NULLDRAFT_PORT", "8011"))
     uvicorn.run(app, host="127.0.0.1", port=port)

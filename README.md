@@ -44,8 +44,11 @@ AI-written introduction and conclusion.
   logo) and automatic figure numbering.
 - **Existing-document enhancement** — drop in a `.docx` / `.tex`, detect figure
   placeholders, and fill them with captures while preserving numbering.
-- **Privacy first** — optional local-only mode (no cloud AI calls) and optional
-  AES-256-GCM encryption of project manifests.
+- **Local-first by default** — capture, editing, and export work offline after
+  installation. Cloud access is optional for invitations, administration, and
+  project-manifest sync.
+- **Privacy first** — local-only AI mode and optional AES-256-GCM encryption
+  of project manifests.
 - **Resilient** — crash recovery resumes an interrupted capture session.
 
 ## Workflow
@@ -69,8 +72,8 @@ Define  ──▶  Review  ──▶  Capture  ──▶  Export
 | UI | React, React Router, Tailwind CSS, shadcn/ui, Framer Motion |
 | Language | TypeScript |
 | Backend | Python · FastAPI · Uvicorn |
-| AI | Mistral AI (`mistral-large-latest`, `pixtral-12b-2409`); optional OpenAI |
-| Documents | python-docx, PyPDF2, Pillow, LibreOffice (PDF) |
+| AI | Mistral AI, OpenAI, Anthropic Claude, or Google Gemini (API key) |
+| Documents | python-docx, pypdf, Pillow, LibreOffice (PDF) |
 
 The Electron app talks to a local FastAPI backend over HTTP. The app starts and
 health-checks the backend automatically.
@@ -81,7 +84,7 @@ health-checks the backend automatically.
 
 - **Node.js** 18+
 - **Python** 3.10+
-- A **Mistral API key** (or OpenAI) for AI features
+- An API key for **Mistral, OpenAI, Anthropic Claude, or Google Gemini** for AI features
 - *(optional)* **LibreOffice** (`soffice`) for PDF export
 
 ### 1. Backend
@@ -98,13 +101,13 @@ Configure `backend/.env`:
 
 ```env
 MISTRAL_API_KEY=your_key_here
-# AI_PROVIDER=mistral              # or "openai"
+# AI_PROVIDER=mistral              # or "openai", "anthropic", or "gemini"
 # OPENAI_API_KEY=your_openai_key
-# NULLDRAFT_PORT=8000
+# NULLDRAFT_PORT=8011
 ```
 
 > The desktop app launches the backend for you. To run it standalone:
-> `python server.py` (serves on `127.0.0.1:8000`).
+> `python server.py` (serves on `127.0.0.1:8011`).
 
 ### 2. Desktop app
 
@@ -120,13 +123,74 @@ On Linux, if the sandbox blocks launch, use:
 npm run dev:no-sandbox
 ```
 
+### 3. Invite-only Cloud API
+
+NullDraft can use an invite-only cloud service. The standard desktop edition
+works without it; connect an account only for invitations, administration, or
+optional project-manifest sync. There is no public registration or password
+login.
+
+To distribute an invite-only edition, build it with a hosted API URL and
+`NULLDRAFT_REQUIRE_CLOUD_ACCESS=1`. That edition keeps the same local
+capture/export workflow, but requires activation before opening it. Project
+sync remains an explicit user choice.
+
+```bash
+NULLDRAFT_REQUIRE_CLOUD_ACCESS=1 \
+NULLDRAFT_CLOUD_API_URL=https://api.example.com \
+npm run build:linux
+```
+Projects, screenshots, reports, and AI usage stay on the user's device. The
+cloud service controls access and stores accounts, project manifests, and usage
+events; screenshot/report file upload is reserved for a future explicit opt-in.
+
+The cloud service requires PostgreSQL. SQLite is not used.
+
+```bash
+cd cloud
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+export DATABASE_URL=postgresql://nulldraft:change-me@localhost:5432/nulldraft
+export NULLDRAFT_ADMIN_EMAILS=your@email.com
+export NULLDRAFT_BOOTSTRAP_SECRET=replace-with-a-long-random-secret
+uvicorn main:app --reload --port 8010
+```
+
+Create the initial administrator invitation once, from a trusted terminal:
+
+```bash
+curl -X POST http://127.0.0.1:8010/v1/bootstrap/invitation \
+  -H "X-Bootstrap-Secret: $NULLDRAFT_BOOTSTRAP_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"your@email.com","name":"Your Name"}'
+```
+
+Open the returned `activation_url` on the admin's computer. After activation,
+the administrator can create and revoke invitations in Settings → Invitations.
+
 ## Building
 
 ```bash
 cd app
 npm run build          # compile main / preload / renderer
-npm run build:linux    # AppImage + deb
+npm run build:linux    # portable AppImage (recommended on any Linux distro)
+npm run build:deb      # Debian package (build on Debian/Ubuntu, or with libcrypt.so.1 available)
 npm run build:win      # nsis + portable
+```
+
+## Testing
+
+```bash
+cd app
+npm run lint
+npm run test:e2e
+
+cd ../backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
 ## Project Structure
@@ -137,14 +201,17 @@ NullDraft/
 │   └── src/
 │       ├── main.ts          # Electron main process
 │       ├── preload.ts       # secure IPC bridge
-│       ├── pages/           # Dashboard, Create, Review, Capture, Export, …
-│       └── components/      # UI components (HUD, workflow stepper, …)
-└── backend/             # FastAPI service
-    ├── server.py            # API endpoints
-    ├── ai.py                # AI provider abstraction & capabilities
-    ├── report_gen.py        # multi-format document generation
-    ├── doc_enhance.py       # inject figures into existing docs
-    └── images.py            # image processing
+│       ├── pages/           # Dashboard, Create, Review, Capture, Export, ...
+│       └── components/      # UI components (HUD, workflow stepper, ...)
+├── backend/             # Local FastAPI service
+│   ├── server.py            # API endpoints
+│   ├── ai.py                # AI provider abstraction & capabilities
+│   ├── report_gen.py        # multi-format document generation
+│   ├── doc_enhance.py       # inject figures into existing docs
+│   └── images.py            # image processing
+└── cloud/               # Invite-only PostgreSQL access/sync API
+    ├── main.py              # FastAPI cloud control plane
+    └── migrations/          # SQL migrations applied on startup
 ```
 
 ## Privacy

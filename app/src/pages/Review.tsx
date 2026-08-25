@@ -1,7 +1,6 @@
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowLeft, ArrowRight, Loader2, Check, Image, X, Sparkles, RefreshCw, Pencil, ScanText, Crop, Lock } from 'lucide-react'
@@ -259,7 +258,7 @@ export default function Review() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen p-8 bg-gradient-to-br from-background via-background to-secondary/5 flex items-center justify-center">
+      <div className="min-h-screen p-8 flex items-center justify-center">
         <div className="text-center space-y-4">
           <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
           <p className="text-muted-foreground">Loading project...</p>
@@ -273,18 +272,15 @@ export default function Review() {
   const progress = steps.length ? Math.round((capturedCount / steps.length) * 100) : 0
 
   return (
-    <div className="min-h-screen p-8 bg-gradient-to-br from-background via-background to-secondary/5">
+    <div className="min-h-screen p-8 pb-24">
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" onClick={handleBack} className="gap-2 hover:bg-white/5">
+          <Button variant="ghost" onClick={handleBack} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Edit Steps
           </Button>
           <div className="text-center">
             <h1 className="text-3xl font-bold gradient-text">Review Steps</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {capturedCount > 0 ? `${capturedCount} of ${steps.length} steps captured` : 'Review your steps before starting capture'}
-            </p>
           </div>
           <Button
             onClick={() => {
@@ -317,12 +313,7 @@ export default function Review() {
           </div>
         </div>
 
-        <div className="text-center">
-          <p className="text-lg text-muted-foreground">Project: <span className="text-foreground font-medium">{projectName}</span></p>
-        </div>
-
-        <ScrollArea className="h-[calc(100vh-320px)] pr-4 -mr-4">
-          <div className="space-y-3 pb-10">
+        <div className="space-y-3 pb-10">
             {steps.map((step) => {
               const isCaptured = !!step.imagePath
               const imageSrc = getImageSrc(step)
@@ -418,8 +409,7 @@ export default function Review() {
                 <Button variant="link" onClick={handleBack} className="mt-2">Go back to add steps</Button>
               </div>
             )}
-          </div>
-        </ScrollArea>
+        </div>
       </div>
 
       {previewImage && (

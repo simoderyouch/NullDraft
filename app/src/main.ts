@@ -1,8 +1,6 @@
 console.log('Main process starting... code execution begun.')
-import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut, shell, dialog, desktopCapturer, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut, shell, dialog, desktopCapturer, screen, safeStorage } from 'electron'
 
-// Disable sandbox on Linux to fix AppImage SUID issues
-// Disable sandbox on Linux to fix AppImage SUID issues (only in production)
 if (process.platform === 'linux') {
   app.disableHardwareAcceleration()
   const isWayland =
@@ -10,15 +8,17 @@ if (process.platform === 'linux') {
   if (isWayland) {
     app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
   }
-  if (app.isPackaged) {
-    app.commandLine.appendSwitch('no-sandbox')
-    app.commandLine.appendSwitch('disable-setuid-sandbox')
-  }
 }
-import { join } from 'path'
+import { basename, join } from 'path'
 import { mkdir, writeFile, readFile, readdir, stat, rm, rename } from 'fs/promises'
 import { existsSync } from 'fs'
+import crypto from 'crypto'
 import { startBackend, stopBackend, getBackendHealth, getBackendUrl } from './backend-manager'
+
+const isE2ETest = process.env.NULLDRAFT_E2E_BYPASS_AUTH === '1'
+if (process.env.NULLDRAFT_USER_DATA_DIR) {
+  app.setPath('userData', process.env.NULLDRAFT_USER_DATA_DIR)
+}
 
 // The built directory structure
 //
@@ -47,6 +47,51 @@ let hudWindow: BrowserWindow | null = null
 let isQuiting = false
 let tray: Tray | null = null
 let hudData: any = null // Store HUD data for retrieval
+const DEFAULT_CLOUD_API_URL = process.env.NULLDRAFT_CLOUD_API_URL || 'http://127.0.0.1:8010'
+const REQUIRE_CLOUD_ACCESS = process.env.NULLDRAFT_REQUIRE_CLOUD_ACCESS === '1'
+const CLOUD_TOKEN_MARKER = 'safe:'
+const CLOUD_TOKEN_PRESENT = '__stored_securely__'
+let pendingInvitationToken: string | null = null
+
+function invitationTokenFromValue(value: string): string | null {
+  const candidate = value.trim()
+  if (/^[A-Za-z0-9_-]{32,512}$/.test(candidate)) return candidate
+  try {
+    const parsed = new URL(candidate)
+    if (parsed.protocol !== 'nulldraft:' || parsed.hostname !== 'activate') return null
+    const token = parsed.searchParams.get('token') || ''
+    return /^[A-Za-z0-9_-]{32,512}$/.test(token) ? token : null
+  } catch {
+    return null
+  }
+}
+
+function receiveInvitationLink(value: string) {
+  const token = invitationTokenFromValue(value)
+  if (!token) return
+  pendingInvitationToken = token
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.send('invitation-link-received', token)
+  }
+}
+
+const initialInvitationLink = process.argv.find((arg) => invitationTokenFromValue(arg))
+if (initialInvitationLink) receiveInvitationLink(initialInvitationLink)
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    const invitationLink = commandLine.find((arg) => invitationTokenFromValue(arg))
+    if (invitationLink) receiveInvitationLink(invitationLink)
+  })
+  app.on('open-url', (event, urlToOpen) => {
+    event.preventDefault()
+    receiveInvitationLink(urlToOpen)
+  })
+}
 
 // Config Interface
 interface AppConfig {
@@ -55,6 +100,7 @@ interface AppConfig {
   skipHotkey: string
   backHotkey: string
   darkMode: boolean
+  backgroundOpacity: number
   provider: string
   defaultProjectLocation: string
   exportFormat: string
@@ -64,6 +110,19 @@ interface AppConfig {
   languageMode: 'auto' | 'manual'
   languageCode: string
   languageName: string
+  cloudEnabled: boolean
+  requireCloudAccess: boolean
+  cloudApiUrl: string
+  cloudAccessToken: string
+  cloudDeviceId: string
+  cloudSyncProjects: boolean
+  cloudSyncConsentVersion: number
+  cloudUploadAssets: boolean
+  cloudUserEmail: string
+  cloudUserName: string
+  cloudUserRole: string
+  cloudLastSyncStatus: string
+  cloudLastSyncAt: string
   localOnly: boolean
   encryptProjects: boolean
   encryptionPassphrase: string
@@ -77,7 +136,8 @@ const DEFAULT_CONFIG: AppConfig = {
   captureHotkey: 'CommandOrControl+Shift+S',
   skipHotkey: 'CommandOrControl+Shift+N',
   backHotkey: 'CommandOrControl+Shift+B',
-  darkMode: false,
+  darkMode: true,
+  backgroundOpacity: 70,
   provider: 'mistral',
   defaultProjectLocation: '',
   exportFormat: 'pdf',
@@ -87,6 +147,19 @@ const DEFAULT_CONFIG: AppConfig = {
   languageMode: 'auto',
   languageCode: 'en',
   languageName: 'English',
+  cloudEnabled: false,
+  requireCloudAccess: REQUIRE_CLOUD_ACCESS,
+  cloudApiUrl: DEFAULT_CLOUD_API_URL,
+  cloudAccessToken: '',
+  cloudDeviceId: '',
+  cloudSyncProjects: false,
+  cloudSyncConsentVersion: 1,
+  cloudUploadAssets: false,
+  cloudUserEmail: '',
+  cloudUserName: '',
+  cloudUserRole: '',
+  cloudLastSyncStatus: '',
+  cloudLastSyncAt: '',
   localOnly: false,
   encryptProjects: false,
   encryptionPassphrase: '',
@@ -107,7 +180,25 @@ async function loadConfig() {
     const configPath = getConfigPath()
     if (existsSync(configPath)) {
       const data = await readFile(configPath, 'utf-8')
-      currentConfig = { ...DEFAULT_CONFIG, ...JSON.parse(data) }
+      const storedConfig = JSON.parse(data)
+      currentConfig = { ...DEFAULT_CONFIG, ...storedConfig }
+      // NullDraft has one intentional visual system: the dark blue theme.
+      // Keep old saved preferences from re-enabling a removed light theme.
+      currentConfig.darkMode = true
+      // This is a distributor policy, not a user preference. A standard
+      // installation always stays usable offline; an invite-only build can
+      // require cloud access by setting the runtime flag.
+      currentConfig.requireCloudAccess = REQUIRE_CLOUD_ACCESS
+      // Sync used to be on by default. Existing installations must explicitly
+      // opt in after this local-first change rather than silently uploading new
+      // project manifests.
+      if (storedConfig.cloudSyncConsentVersion !== 1) {
+        currentConfig.cloudSyncProjects = false
+      }
+      currentConfig.cloudAccessToken = decryptCloudToken(storedConfig.cloudAccessToken || '')
+      if (!currentConfig.cloudApiUrl || currentConfig.cloudApiUrl === 'https://api.nulldraft.com') {
+        currentConfig.cloudApiUrl = DEFAULT_CLOUD_API_URL
+      }
     } else {
       await saveConfig(DEFAULT_CONFIG)
     }
@@ -119,8 +210,10 @@ async function loadConfig() {
 async function saveConfig(config: AppConfig) {
   try {
     const configPath = getConfigPath()
-    await writeFile(configPath, JSON.stringify(config, null, 2))
-    currentConfig = config
+    const normalizedConfig = { ...config, darkMode: true }
+    const storedConfig = { ...normalizedConfig, cloudAccessToken: encryptCloudToken(normalizedConfig.cloudAccessToken) }
+    await writeFile(configPath, JSON.stringify(storedConfig, null, 2))
+    currentConfig = normalizedConfig
     registerGlobalShortcuts() // Re-register shortcuts on save
   } catch (error) {
     console.error('Failed to save config:', error)
@@ -128,9 +221,33 @@ async function saveConfig(config: AppConfig) {
 }
 
 // ---- Project encryption (at rest) ----
-import crypto from 'crypto'
-
 const ENC_MARKER = '__nulldraft_encrypted__'
+
+function encryptCloudToken(token: string): string {
+  if (!token) return ''
+  if (!safeStorage.isEncryptionAvailable()) {
+    console.warn('[cloud] secure storage is unavailable; the session will be stored unencrypted')
+    return token
+  }
+  return `${CLOUD_TOKEN_MARKER}${safeStorage.encryptString(token).toString('base64')}`
+}
+
+function decryptCloudToken(value: string): string {
+  if (!value || !value.startsWith(CLOUD_TOKEN_MARKER)) return value
+  try {
+    return safeStorage.decryptString(Buffer.from(value.slice(CLOUD_TOKEN_MARKER.length), 'base64'))
+  } catch (error) {
+    console.warn('[cloud] could not decrypt saved session; signing out', error)
+    return ''
+  }
+}
+
+function rendererConfig(): AppConfig {
+  return {
+    ...currentConfig,
+    cloudAccessToken: isE2ETest || currentConfig.cloudAccessToken ? CLOUD_TOKEN_PRESENT : '',
+  }
+}
 
 function deriveKey(passphrase: string, salt: Buffer): Buffer {
   return crypto.scryptSync(passphrase, salt, 32)
@@ -183,6 +300,75 @@ async function writeManifestFile(manifestPath: string, manifest: unknown) {
 async function readManifestFile(manifestPath: string): Promise<any> {
   const raw = await readFile(manifestPath, 'utf-8')
   return decryptJson(raw, currentConfig.encryptionPassphrase)
+}
+
+function cloudBaseUrl(): string {
+  return (currentConfig.cloudApiUrl || '').trim().replace(/\/$/, '')
+}
+
+function canUseCloud(): boolean {
+  return !!(currentConfig.cloudEnabled && cloudBaseUrl() && currentConfig.cloudAccessToken)
+}
+
+async function clearInvalidCloudSession() {
+  await saveConfig({
+    ...currentConfig,
+    cloudAccessToken: '',
+    cloudUserEmail: '',
+    cloudUserName: '',
+    cloudUserRole: '',
+    cloudLastSyncStatus: 'Access revoked. Please contact an administrator.',
+  })
+}
+
+async function cloudRequest(path: string, init: RequestInit = {}, token = currentConfig.cloudAccessToken) {
+  const baseUrl = cloudBaseUrl()
+  if (!baseUrl) throw new Error('Cloud API URL is required')
+  const headers = new Headers(init.headers || {})
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers })
+  const text = await response.text()
+  let body: any = {}
+  try {
+    body = text ? JSON.parse(text) : {}
+  } catch {
+    body = {}
+  }
+  if (response.status === 401 && token && token === currentConfig.cloudAccessToken) {
+    await clearInvalidCloudSession()
+  }
+  if (!response.ok) throw new Error(body.detail || body.message || `Cloud request failed (${response.status})`)
+  return body
+}
+
+async function trackCloudEvent(type: string, payload: Record<string, unknown> = {}) {
+  if (!canUseCloud()) return
+  try {
+    await cloudRequest('/v1/events', {
+      method: 'POST',
+      body: JSON.stringify({ type, payload }),
+    })
+  } catch (error) {
+    console.warn('[cloud] event failed:', error)
+  }
+}
+
+async function syncProjectToCloud(projectPath: string, manifest: any) {
+  if (!canUseCloud() || !currentConfig.cloudSyncProjects) {
+    return { skipped: true }
+  }
+  const localId = basename(projectPath)
+  return await cloudRequest('/v1/projects/sync', {
+    method: 'POST',
+    body: JSON.stringify({
+      local_id: localId,
+      name: manifest.projectName || manifest.name || localId,
+      manifest,
+      updated_at: manifest.updatedAt || new Date().toISOString(),
+      last_known_cloud_updated_at: manifest.cloudUpdatedAt || null,
+    }),
+  })
 }
 
 // Global Shortcut Management
@@ -248,16 +434,23 @@ async function createProjectDir(projectName: string): Promise<string> {
 // In dev: out/preload/preload.js, in production: dist-electron/preload.js
 const preload = join(__dirname, '../preload/preload.js')
 // Get Vite dev server URL - electron-vite sets this, but fallback to default
-const url = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
+const url = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173'
+
+function iconPath(size: 32 | 512): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icons', `${size}x${size}.png`)
+    : join(__dirname, '../../build/icons', `${size}x${size}.png`)
+}
+
+function loadAppIcon(size: 32 | 512) {
+  const path = iconPath(size)
+  const icon = nativeImage.createFromPath(path)
+  if (icon.isEmpty()) console.error('Failed to load app icon from:', path)
+  return icon
+}
 
 function createMainWindow() {
-  const iconPath = join(__dirname, '../../build/icons/512x512.png')
-  const appIcon = nativeImage.createFromPath(iconPath)
-  if (appIcon.isEmpty()) {
-    console.error('Failed to load icon from:', iconPath)
-  } else {
-    console.log('Icon loaded successfully from:', iconPath)
-  }
+  const appIcon = loadAppIcon(512)
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -266,16 +459,14 @@ function createMainWindow() {
     minHeight: 600,
     resizable: true,
     frame: false,
+    show: true,
     autoHideMenuBar: true,
     icon: appIcon,
-    ...(process.platform === 'linux' ? {
-      icon: appIcon,
-    } : {}),
     webPreferences: {
       preload,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false, // Allow loading local file:// images
+      webSecurity: true,
     },
     titleBarStyle: 'hidden',
     transparent: true,
@@ -295,11 +486,24 @@ function createMainWindow() {
   mainWindow.setIcon(appIcon)
 
   if (!app.isPackaged && url) {
-    mainWindow.loadURL(url)
-    mainWindow.webContents.openDevTools()
+    mainWindow.loadURL(url).catch((error) => {
+      console.error('[renderer] Failed to load dev server:', error)
+    })
   } else {
     mainWindow.loadFile(join(process.env.DIST || '', 'index.html'))
   }
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[renderer] did-fail-load:', errorCode, errorDescription, validatedURL)
+  })
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[renderer] did-finish-load:', mainWindow?.webContents.getURL())
+    if (pendingInvitationToken) {
+      mainWindow?.webContents.send('invitation-link-received', pendingInvitationToken)
+    }
+  })
+
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -311,6 +515,7 @@ function createHUDWindow() {
     width: 600,
     height: 500,
     center: true,
+    show: false,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -322,7 +527,7 @@ function createHUDWindow() {
       preload,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: true,
     },
     backgroundColor: '#00000000',
   })
@@ -350,18 +555,11 @@ function createHUDWindow() {
     console.log('HUD ready to show')
   })
 
-  // Open DevTools for HUD to help debug
-  hudWindow.webContents.openDevTools({ mode: 'detach' })
-
   hudWindow.hide()
 }
 
 app.on('window-all-closed', () => {
-
-  if (process.platform !== 'darwin' && !isQuiting) {
-  } else if (isQuiting) {
-    app.quit()
-  }
+  if (isQuiting) app.quit()
 })
 
 app.on('before-quit', () => {
@@ -379,8 +577,8 @@ app.on('activate', () => {
 })
 
 function createTray() {
-  const icon = nativeImage.createEmpty()
-  icon.setTemplateImage(true)
+  const icon = loadAppIcon(32)
+  if (process.platform === 'darwin') icon.setTemplateImage(true)
 
   tray = new Tray(icon)
 
@@ -693,10 +891,8 @@ function selectRegion(displayId?: number): Promise<{ x: number; y: number; width
 app.whenReady().then(async () => {
   await loadConfig() // Load config before creating windows
 
-  // Set desktop name for Linux icon association
-  if (process.platform === 'linux') {
-    // @ts-ignore
-    app.setDesktopName('NullDraft.desktop')
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient('nulldraft')
   }
 
   Menu.setApplicationMenu(null)
@@ -707,7 +903,7 @@ app.whenReady().then(async () => {
 
   // Start the Python backend (non-blocking; reuses an existing one in dev)
   startBackend({
-    apiKey: currentConfig.apiKey || process.env.MISTRAL_API_KEY,
+    apiKey: currentConfig.apiKey,
     provider: currentConfig.provider,
   }).then((res) => {
     console.log('[backend] start result:', res)
@@ -715,12 +911,174 @@ app.whenReady().then(async () => {
 
   // Config IPC Handlers
   ipcMain.handle('get-config', () => {
-    return currentConfig
+    return rendererConfig()
   })
 
   ipcMain.handle('save-config', async (_event, config: AppConfig) => {
-    await saveConfig(config)
+    const backendSettingsChanged = config.apiKey !== currentConfig.apiKey || config.provider !== currentConfig.provider
+    const cloudAccessToken = config.cloudAccessToken === CLOUD_TOKEN_PRESENT
+      ? currentConfig.cloudAccessToken
+      : config.cloudAccessToken
+    await saveConfig({ ...currentConfig, ...config, cloudAccessToken })
+    if (backendSettingsChanged) {
+      stopBackend()
+      await startBackend({ apiKey: currentConfig.apiKey, provider: currentConfig.provider })
+    }
     return true
+  })
+
+  ipcMain.handle('get-pending-invitation', () => {
+    const token = pendingInvitationToken
+    pendingInvitationToken = null
+    return token
+  })
+
+  ipcMain.handle('cloud-account-status', async () => {
+    if (isE2ETest) {
+      return {
+        connected: true,
+        user: { email: 'e2e@nulldraft.test', name: 'E2E Tester', role: 'admin' },
+        lastSyncStatus: 'E2E test mode',
+      }
+    }
+    if (!canUseCloud()) return { connected: false, skipped: true }
+    try {
+      const result = await cloudRequest('/v1/me')
+      return { connected: true, lastSyncStatus: currentConfig.cloudLastSyncStatus, lastSyncAt: currentConfig.cloudLastSyncAt, ...result }
+    } catch (error) {
+      return { connected: false, error: String(error), lastSyncStatus: currentConfig.cloudLastSyncStatus }
+    }
+  })
+
+  ipcMain.handle('cloud-accept-invitation', async (_event, data: { apiUrl: string; invitation: string }) => {
+    const invitationToken = invitationTokenFromValue(data.invitation)
+    if (!invitationToken) {
+      return { success: false, error: 'Enter a valid NullDraft invitation link or token' }
+    }
+    const previous = currentConfig
+    currentConfig = { ...currentConfig, cloudApiUrl: data.apiUrl, cloudEnabled: true }
+    try {
+      const deviceId = previous.cloudDeviceId || crypto.randomUUID()
+      const result = await cloudRequest('/v1/auth/accept-invitation', {
+        method: 'POST',
+        body: JSON.stringify({
+          token: invitationToken,
+          device_id: deviceId,
+          device_name: `${process.platform} desktop`,
+        }),
+      }, '')
+      await saveConfig({
+        ...previous,
+        cloudEnabled: true,
+        cloudApiUrl: data.apiUrl,
+        cloudAccessToken: result.token,
+        cloudDeviceId: deviceId,
+        cloudSyncProjects: false,
+        cloudUserEmail: result.user?.email || '',
+        cloudUserName: result.user?.name || '',
+        cloudUserRole: result.user?.role || 'user',
+        cloudLastSyncStatus: 'Activated',
+      })
+      return { success: true, ...result }
+    } catch (error) {
+      currentConfig = previous
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('cloud-logout', async () => {
+    try {
+      if (canUseCloud()) {
+        await cloudRequest('/v1/auth/logout', { method: 'POST' })
+      }
+    } catch (error) {
+      console.warn('[cloud] logout revoke failed:', error)
+    }
+    await saveConfig({
+      ...currentConfig,
+      cloudAccessToken: '',
+      cloudUserEmail: '',
+      cloudUserName: '',
+      cloudUserRole: '',
+      cloudLastSyncStatus: 'Logged out',
+    })
+    return { success: true }
+  })
+
+  ipcMain.handle('cloud-update-profile', async (_event, data: { name: string }) => {
+    try {
+      const result = await cloudRequest('/v1/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: data.name }),
+      })
+      await saveConfig({
+        ...currentConfig,
+        cloudUserName: result.user?.name || data.name,
+        cloudUserEmail: result.user?.email || currentConfig.cloudUserEmail,
+        cloudUserRole: result.user?.role || currentConfig.cloudUserRole,
+      })
+      return { success: true, ...result }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('cloud-create-invitation', async (_event, data: { email: string; name?: string }) => {
+    try {
+      const result = await cloudRequest('/v1/admin/invitations', {
+        method: 'POST',
+        body: JSON.stringify({ email: data.email, name: data.name || undefined }),
+      })
+      return { success: true, ...result }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('cloud-list-invitations', async () => {
+    try {
+      const result = await cloudRequest('/v1/admin/invitations')
+      return { success: true, invitations: result.invitations || [] }
+    } catch (error) {
+      return { success: false, error: String(error), invitations: [] }
+    }
+  })
+
+  ipcMain.handle('cloud-open-admin-console', async () => {
+    try {
+      const result = await cloudRequest('/v1/admin/console-session', { method: 'POST' })
+      await shell.openExternal(result.admin_url)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('cloud-revoke-invitation', async (_event, invitationId: string) => {
+    try {
+      const result = await cloudRequest(`/v1/admin/invitations/${encodeURIComponent(invitationId)}/revoke`, { method: 'POST' })
+      return { success: true, ...result }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('cloud-list-users', async () => {
+    try {
+      const result = await cloudRequest('/v1/admin/users')
+      return { success: true, users: result.users || [] }
+    } catch (error) {
+      return { success: false, error: String(error), users: [] }
+    }
+  })
+
+  ipcMain.handle('cloud-revoke-user-access', async (_event, userId: string) => {
+    try {
+      const result = await cloudRequest(`/v1/admin/users/${encodeURIComponent(userId)}/revoke`, { method: 'POST' })
+      return { success: true, ...result }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 
 
@@ -847,6 +1205,7 @@ app.whenReady().then(async () => {
     try {
       const projectPath = await createProjectDir(projectName)
       console.log('Project initialized at:', projectPath)
+      trackCloudEvent('project_created', { projectName }).catch(() => {})
       return { success: true, projectPath }
     } catch (error) {
       console.error('Failed to init project:', error)
@@ -859,8 +1218,25 @@ app.whenReady().then(async () => {
     try {
       const manifestPath = join(data.projectPath, 'project.json')
       await writeManifestFile(manifestPath, data.manifest)
+      let cloud: any = { skipped: true }
+      try {
+        cloud = await syncProjectToCloud(data.projectPath, data.manifest)
+        if (cloud?.success) {
+          await saveConfig({
+            ...currentConfig,
+            cloudLastSyncStatus: 'Synced',
+            cloudLastSyncAt: cloud.last_synced_at || new Date().toISOString(),
+          })
+        } else if (cloud?.conflict) {
+          await saveConfig({ ...currentConfig, cloudLastSyncStatus: 'Conflict: cloud has newer changes' })
+        }
+      } catch (cloudError) {
+        console.warn('[cloud] project sync failed:', cloudError)
+        cloud = { success: false, error: String(cloudError) }
+        await saveConfig({ ...currentConfig, cloudLastSyncStatus: `Sync failed: ${String(cloudError)}` })
+      }
       console.log('Project manifest saved to:', manifestPath)
-      return { success: true }
+      return { success: true, cloud }
     } catch (error) {
       console.error('Failed to save manifest:', error)
       return { success: false, error: String(error) }
@@ -946,6 +1322,7 @@ app.whenReady().then(async () => {
       }
 
       await rm(projectPath, { recursive: true, force: true })
+      trackCloudEvent('project_deleted_local', { localId: basename(projectPath) }).catch(() => {})
       return { success: true }
     } catch (error) {
       console.error('Failed to delete project:', error)
@@ -1117,4 +1494,3 @@ app.whenReady().then(async () => {
     return true
   })
 })
-

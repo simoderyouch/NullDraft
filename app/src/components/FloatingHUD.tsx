@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { Camera, ArrowRight, ArrowLeft, Check, Loader2, CheckCircle2, Minimize2, Maximize2, StickyNote, Home } from 'lucide-react'
+import { Camera, ArrowRight, ArrowLeft, Check, Loader2, CheckCircle2, Minimize2, Maximize2, StickyNote, Home, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface StepData {
   id: string
@@ -24,6 +24,8 @@ interface HUDData {
 
 type CaptureStatus = 'idle' | 'capturing' | 'success' | 'error'
 
+const HUD_DESCRIPTION_LIMIT = 160
+
 export default function FloatingHUD() {
   const [hudData, setHudData] = useState<HUDData>({
     currentStep: 1,
@@ -41,10 +43,20 @@ export default function FloatingHUD() {
   const [miniMode, setMiniMode] = useState(false)
   const [showNotes, setShowNotes] = useState(false)
   const [notes, setNotes] = useState<Record<number, string>>({})
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
 
   // Get active (non-skipped) steps
-  const activeSteps = hudData.steps?.filter(s => !s.skipped) || []
+  const activeSteps = useMemo(() => hudData.steps?.filter(s => !s.skipped) || [], [hudData.steps])
   const currentStep = activeSteps[currentStepIndex]
+  const stepDescription = currentStep?.description || hudData.stepDescription
+  const shouldCollapseDescription = stepDescription.length > HUD_DESCRIPTION_LIMIT
+  const displayedDescription = shouldCollapseDescription && !isDescriptionExpanded
+    ? `${stepDescription.slice(0, HUD_DESCRIPTION_LIMIT).trimEnd()}…`
+    : stepDescription
+
+  useEffect(() => {
+    setIsDescriptionExpanded(false)
+  }, [currentStep?.id, hudData.stepNumber, hudData.stepDescription])
 
   useEffect(() => {
     async function loadDisplays() {
@@ -302,40 +314,54 @@ export default function FloatingHUD() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <h3 className="text-lg font-semibold text-white">
               {currentStep?.title || hudData.stepTitle}
             </h3>
             <p className="text-sm text-white/90 leading-relaxed">
-              {currentStep?.description || hudData.stepDescription}
+              {displayedDescription}
             </p>
+            {shouldCollapseDescription && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsDescriptionExpanded((expanded) => !expanded)}
+                className="h-6 px-1 text-xs text-blue-200 hover:bg-white/10 hover:text-white"
+              >
+                {isDescriptionExpanded ? (
+                  <><ChevronUp className="mr-1 h-3.5 w-3.5" />Show less</>
+                ) : (
+                  <><ChevronDown className="mr-1 h-3.5 w-3.5" />See more</>
+                )}
+              </Button>
+            )}
           </div>
 
           {/* Capture mode selector */}
           <div className="flex items-center gap-2">
-            <select
+            <HUDSelect
               value={captureMode}
-              onChange={(e) => setCaptureMode(e.target.value as any)}
-              className="flex-1 h-8 rounded-md bg-white/10 border border-white/20 text-white text-xs px-2"
-            >
-              <option value="fullscreen" className="text-black">Full screen</option>
-              <option value="window" className="text-black">Active window</option>
-              <option value="display" className="text-black">Specific display</option>
-              <option value="region" className="text-black">Region (drag to select)</option>
-            </select>
+              onValueChange={(value) => setCaptureMode(value as typeof captureMode)}
+              options={[
+                { value: 'fullscreen', label: 'Full screen' },
+                { value: 'window', label: 'Active window' },
+                { value: 'display', label: 'Specific display' },
+                { value: 'region', label: 'Region (drag to select)' },
+              ]}
+            />
             {captureMode === 'display' && (
-              <select
-                value={displayId ?? ''}
-                onChange={(e) => setDisplayId(Number(e.target.value))}
-                className="flex-1 h-8 rounded-md bg-white/10 border border-white/20 text-white text-xs px-2"
-              >
-                <option value="" className="text-black">Choose...</option>
-                {displays.map((d) => (
-                  <option key={d.id} value={d.id} className="text-black">
-                    {d.label}{d.isPrimary ? ' (primary)' : ''}
-                  </option>
-                ))}
-              </select>
+              <HUDSelect
+                value={displayId == null ? '' : String(displayId)}
+                onValueChange={(value) => setDisplayId(value ? Number(value) : undefined)}
+                options={[
+                  { value: '', label: 'Choose display…' },
+                  ...displays.map((display) => ({
+                    value: String(display.id),
+                    label: `${display.label}${display.isPrimary ? ' (primary)' : ''}`,
+                  })),
+                ]}
+              />
             )}
             <Button size="icon" variant="ghost" onClick={() => setShowNotes(!showNotes)} className="h-8 w-8 text-white/70 hover:bg-white/10" title="Notes">
               <StickyNote className="h-4 w-4" />
@@ -408,7 +434,7 @@ export default function FloatingHUD() {
               </Button>
             </div>
             <p className="text-xs text-white/50 text-center mt-3">
-              Press <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-xs">Ctrl+Shift+S</kbd> to capture
+              Press <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-xs">Ctrl + Shift + S</kbd> to capture
             </p>
           </div>
         </CardContent>
@@ -417,3 +443,103 @@ export default function FloatingHUD() {
   )
 }
 
+type HUDSelectOption = {
+  value: string
+  label: string
+}
+
+function HUDSelect({
+  value,
+  onValueChange,
+  options,
+}: {
+  value: string
+  onValueChange: (value: string) => void
+  options: HUDSelectOption[]
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const selectRef = useRef<HTMLDivElement>(null)
+  const selectedOption = options.find((option) => option.value === value) || options[0]
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!selectRef.current?.contains(event.target as Node)) setIsOpen(false)
+    }
+
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick)
+  }, [isOpen])
+
+  const chooseOption = (nextValue: string) => {
+    onValueChange(nextValue)
+    setIsOpen(false)
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      setIsOpen((open) => !open)
+      return
+    }
+
+    if (event.key === 'Escape') {
+      setIsOpen(false)
+      return
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const currentIndex = Math.max(0, options.findIndex((option) => option.value === value))
+      const direction = event.key === 'ArrowDown' ? 1 : -1
+      const nextIndex = (currentIndex + direction + options.length) % options.length
+      onValueChange(options[nextIndex].value)
+      setIsOpen(true)
+    }
+  }
+
+  return (
+    <div ref={selectRef} className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <button
+        type="button"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={handleKeyDown}
+        className="flex h-8 w-full items-center justify-between rounded-md border border-white/20 bg-white/10 px-2 text-left text-xs text-white transition-colors hover:border-white/35 hover:bg-white/[0.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="truncate">{selectedOption?.label}</span>
+        <ChevronDown className={`ml-2 h-3.5 w-3.5 shrink-0 text-white/65 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div
+          role="listbox"
+          className="absolute left-0 z-[90] mt-1 w-full overflow-hidden rounded-lg border border-white/20 bg-[hsla(222,44%,12%,0.98)] p-1 shadow-2xl shadow-black/60 backdrop-blur-xl"
+        >
+          {options.map((option) => {
+            const isSelected = option.value === value
+            return (
+              <button
+                key={option.value || '__empty__'}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => chooseOption(option.value)}
+                className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors ${isSelected
+                  ? 'bg-blue-500/25 text-white'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  }`}
+              >
+                <span className="truncate">{option.label}</span>
+                {isSelected && <Check className="ml-2 h-3.5 w-3.5 shrink-0 text-blue-300" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

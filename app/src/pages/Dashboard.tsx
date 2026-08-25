@@ -247,7 +247,7 @@ export default function Dashboard() {
                 </p>
                 <div className="flex justify-center gap-2 text-sm text-muted-foreground">
                   {['.pdf', '.docx', '.txt', '.tex'].map((ext) => (
-                    <span key={ext} className="px-2.5 py-1 rounded-full border border-white/10 bg-white/5 font-mono text-xs">{ext}</span>
+                    <span key={ext} className="px-2.5 py-1 rounded-full border border-border bg-secondary/60 font-mono text-xs dark:border-white/10 dark:bg-white/5">{ext}</span>
                   ))}
                 </div>
               </motion.div>
@@ -312,4 +312,3 @@ export default function Dashboard() {
     </div>
   )
 }
-

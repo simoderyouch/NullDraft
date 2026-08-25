@@ -1,0 +1,5 @@
+TP Docker
+
+1. Install Docker by running sudo apt-get update and the Docker Engine installation commands.
+2. Run docker --version to verify the installed Docker version.
+3. Run docker run hello-world and verify the welcome message.

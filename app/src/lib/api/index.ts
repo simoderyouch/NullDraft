@@ -13,7 +13,7 @@ async function getBaseUrl(): Promise<string> {
     } catch {
         // ignore
     }
-    cachedBaseUrl = 'http://127.0.0.1:8000'
+    cachedBaseUrl = 'http://127.0.0.1:8011'
     return cachedBaseUrl
 }
 
@@ -83,7 +83,10 @@ export async function uploadAssessmentAndGenerateSteps(file: File, language?: { 
         method: 'POST',
         body: formData,
     })
-    if (!response.ok) throw new Error('Failed to analyze instructions')
+    if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || 'Failed to analyze instructions')
+    }
     return response.json()
 }
 
@@ -132,16 +135,6 @@ export async function validateStep(stepTitle: string, stepDescription: string, i
     const response = await fetch(url, { method: 'POST', body: formData })
     if (!response.ok) throw new Error('Failed to validate step')
     return response.json() as Promise<{ pass: boolean; confidence: number; message: string }>
-}
-
-export async function detectSensitive(imagePath: string) {
-    await assertCloudAllowed()
-    const blob = await fileToBlob(imagePath)
-    const formData = new FormData()
-    formData.append('file', blob, 'screenshot.png')
-    const response = await fetch(await api('/detect-sensitive'), { method: 'POST', body: formData })
-    if (!response.ok) throw new Error('Failed to detect sensitive data')
-    return response.json() as Promise<{ regions: Array<{ x: number; y: number; width: number; height: number; type: string }> }>
 }
 
 export async function ocrImage(imagePath: string) {

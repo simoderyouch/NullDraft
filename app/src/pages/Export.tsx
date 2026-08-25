@@ -287,12 +287,12 @@ export default function Export() {
                         className={`relative text-left rounded-xl border p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                           selected
                             ? 'border-primary bg-primary/10'
-                            : 'border-white/10 bg-white/5 hover:border-white/25 hover:bg-white/10'
+                            : 'border-border bg-secondary/40 hover:border-primary/35 hover:bg-primary/5 dark:border-white/10 dark:bg-white/5 dark:hover:border-white/25 dark:hover:bg-white/10'
                         }`}
                       >
                         <span
                           className={`absolute top-3 right-3 flex h-4 w-4 items-center justify-center rounded-full border ${
-                            selected ? 'border-primary bg-primary' : 'border-white/25'
+                            selected ? 'border-primary bg-primary' : 'border-border dark:border-white/25'
                           }`}
                         >
                           {selected && <CheckCircle2 className="h-4 w-4 text-primary-foreground" />}

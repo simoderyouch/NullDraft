@@ -5,7 +5,16 @@ import { app } from 'electron'
 import http from 'http'
 
 let backendProcess: ChildProcess | null = null
-let backendPort = 8000
+// Port 8000 is commonly used by local development tools, so keep NullDraft's
+// backend on an unambiguous port to avoid attaching to an unrelated service.
+let backendPort = 8011
+
+const providerKeyEnvironment: Record<string, string> = {
+  mistral: 'MISTRAL_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+}
 
 export function getBackendUrl(): string {
   return `http://127.0.0.1:${backendPort}`
@@ -44,6 +53,12 @@ function findExistingVenvPython(backendDir: string): string | null {
   return null
 }
 
+function bundledPython(): string | null {
+  if (process.platform !== 'win32') return null
+  const executable = join(process.resourcesPath || '', 'python', 'python.exe')
+  return existsSync(executable) ? executable : null
+}
+
 function systemPython(): string {
   return process.platform === 'win32' ? 'python' : 'python3'
 }
@@ -54,6 +69,9 @@ function systemPython(): string {
  * userData and pip-install requirements on first launch.
  */
 function ensurePythonBin(backendDir: string): string {
+  const bundled = bundledPython()
+  if (bundled) return bundled
+
   const existing = findExistingVenvPython(backendDir)
   if (existing) return existing
 
@@ -132,11 +150,20 @@ export async function startBackend(options: {
   console.log('[backend] Starting:', python, serverPath)
 
   const env: NodeJS.ProcessEnv = { ...process.env, NULLDRAFT_PORT: String(backendPort) }
-  if (options.apiKey) env.MISTRAL_API_KEY = options.apiKey
-  if (options.provider) env.AI_PROVIDER = options.provider
+  const provider = (options.provider || 'mistral').toLowerCase()
+  if (options.apiKey) env[providerKeyEnvironment[provider] || 'MISTRAL_API_KEY'] = options.apiKey
+  env.AI_PROVIDER = provider
 
   try {
-    backendProcess = spawn(python, [serverPath], {
+    // The embedded Windows Python distribution runs in isolated mode, so it
+    // does not add the script folder to sys.path by itself. Start server.py
+    // through runpy after adding the bundled backend directory explicitly.
+    const launcher = [
+      'import runpy, sys',
+      `sys.path.insert(0, ${JSON.stringify(backendDir)})`,
+      `runpy.run_path(${JSON.stringify(serverPath)}, run_name='__main__')`,
+    ].join('; ')
+    backendProcess = spawn(python, ['-c', launcher], {
       cwd: backendDir,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],

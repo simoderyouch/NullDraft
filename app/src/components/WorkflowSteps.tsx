@@ -53,20 +53,20 @@ export default function WorkflowSteps({ current, projectPath, className = '' }: 
                 ${isCurrent
                   ? 'bg-gradient-to-br from-primary to-accent text-primary-foreground'
                   : isDone
-                    ? 'text-foreground/90 hover:bg-white/10'
+                    ? 'text-foreground/90 hover:bg-primary/5 dark:hover:bg-white/10'
                     : 'text-muted-foreground/60'}
                 ${reachable && !isCurrent ? 'cursor-pointer' : 'cursor-default'}`}
             >
               <span
                 className={`flex h-9 w-9 items-center justify-center rounded-full font-bold
-                  ${isCurrent ? 'bg-white/25' : isDone ? 'bg-green-500/20 text-green-400' : 'bg-white/5'}`}
+                  ${isCurrent ? 'bg-white/25' : isDone ? 'bg-green-500/20 text-green-600 dark:text-green-400' : 'bg-muted dark:bg-white/5'}`}
               >
                 {isDone ? <Check className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
               </span>
               <span className="font-medium hidden sm:inline">{stage.label}</span>
             </button>
             {i < STAGES.length - 1 && (
-              <div className={`h-px w-5 sm:w-9 mx-0.5 ${i < currentIndex ? 'bg-primary/50' : 'bg-white/10'}`} />
+              <div className={`h-px w-5 sm:w-9 mx-0.5 ${i < currentIndex ? 'bg-primary/50' : 'bg-border dark:bg-white/10'}`} />
             )}
           </div>
         )
